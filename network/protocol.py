@@ -1,6 +1,6 @@
 """
-Protocolo de mensajes P2P - VERSIÓN MÍNIMA FASE 1
-Define formato básico de mensajes
+Protocolo de mensajes P2P - VERSIÓN MÍNIMA FASE 1.5
+Define formato básico de mensajes + gossip
 """
 
 import json
@@ -14,7 +14,7 @@ def create_message(msg_type: str, payload: dict) -> dict:
     Crea un mensaje P2P con formato estándar
     
     Args:
-        msg_type: Tipo de mensaje (ej. "version", "ping", "hello")
+        msg_type: Tipo de mensaje
         payload: Datos del mensaje
     
     Returns:

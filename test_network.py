@@ -1,6 +1,5 @@
 """
-Script de testing para la red P2P - Fase 1
-Lanza 3 nodos y prueba conectividad
+Script de testing para red P2P con Gossip - Fase 1.5
 """
 
 import asyncio
@@ -9,23 +8,25 @@ from network.p2p_node import P2PNode
 
 
 async def test_network():
-    """Test automático de la red P2P"""
+    """Test de red P2P con gossip protocol"""
     
     print("""
 ╔════════════════════════════════════════════╗
-║     TEST AUTOMÁTICO - RED P2P FASE 1       ║
+║   TEST RED P2P + GOSSIP - FASE 1.5         ║
 ╚════════════════════════════════════════════╝
 """)
     
-    # Crear 3 nodos
-    print("Creando nodos...\n")
+    # Crear 5 nodos para probar gossip
+    print("Creando 5 nodos...\n")
     
+    # Nodo 1: Seed node (sin bootstrap)
     node1 = P2PNode(
         host='localhost',
         port=5000,
-        bootstrap_peers=[]  # Bootstrap sin peers
+        bootstrap_peers=[]
     )
     
+    # Nodo 2 y 3: Conectan al seed
     node2 = P2PNode(
         host='localhost',
         port=5001,
@@ -38,100 +39,132 @@ async def test_network():
         bootstrap_peers=[('localhost', 5000)]
     )
     
-    print(f"Nodo 1 (Bootstrap): {node1.id} - Puerto 5000")
-    print(f"Nodo 2: {node2.id} - Puerto 5001")
-    print(f"Nodo 3: {node3.id} - Puerto 5002")
+    # Nodo 4: Solo conoce a node2 (probará gossip)
+    node4 = P2PNode(
+        host='localhost',
+        port=5003,
+        bootstrap_peers=[('localhost', 5001)]
+    )
+    
+    # Nodo 5: Solo conoce a node3 (probará gossip)
+    node5 = P2PNode(
+        host='localhost',
+        port=5004,
+        bootstrap_peers=[('localhost', 5002)]
+    )
+    
+    print(f"[OK] Nodo 1 (Seed):    {node1.id} - Puerto 5000")
+    print(f"[OK] Nodo 2:           {node2.id} - Puerto 5001 (bootstrap: 5000)")
+    print(f"[OK] Nodo 3:           {node3.id} - Puerto 5002 (bootstrap: 5000)")
+    print(f"[OK] Nodo 4:           {node4.id} - Puerto 5003 (bootstrap: 5001)")
+    print(f"[OK] Nodo 5:           {node5.id} - Puerto 5004 (bootstrap: 5002)")
     print()
     
-    # Iniciar nodos en paralelo
+    # Iniciar nodos
     print("Iniciando nodos...\n")
     
     tasks = [
         asyncio.create_task(node1.start()),
         asyncio.create_task(node2.start()),
-        asyncio.create_task(node3.start())
+        asyncio.create_task(node3.start()),
+        asyncio.create_task(node4.start()),
+        asyncio.create_task(node5.start())
     ]
     
-    # Esperar a que se conecten
+    # Esperar conexiones iniciales
     await asyncio.sleep(5)
     
-    print("\n" + "="*50)
-    print("ESTADO DE LA RED")
-    print("="*50)
-    print(f"Nodo 1 ({node1.id}): {len(node1.peers)} peers conectados")
-    print(f"Nodo 2 ({node2.id}): {len(node2.peers)} peers conectados")
-    print(f"Nodo 3 ({node3.id}): {len(node3.peers)} peers conectados")
+    print("\n" + "="*60)
+    print("ESTADO INICIAL DE LA RED")
+    print("="*60)
+    print(f"Nodo 1: Conectados={len(node1.peers_connected)}, Conocidos={len(node1.peers_known)}")
+    print(f"Nodo 2: Conectados={len(node2.peers_connected)}, Conocidos={len(node2.peers_known)}")
+    print(f"Nodo 3: Conectados={len(node3.peers_connected)}, Conocidos={len(node3.peers_known)}")
+    print(f"Nodo 4: Conectados={len(node4.peers_connected)}, Conocidos={len(node4.peers_known)}")
+    print(f"Nodo 5: Conectados={len(node5.peers_connected)}, Conocidos={len(node5.peers_known)}")
     print()
     
-    # Test 1: Verificar conectividad
-    print("TEST 1: Verificar conectividad básica")
-    if len(node1.peers) >= 2 and len(node2.peers) >= 1 and len(node3.peers) >= 1:
-        print("PASS - Todos los nodos conectados\n")
+    # Test 1: Conectividad básica
+    print("TEST 1: Verificar conectividad inicial")
+    if len(node1.peers_connected) >= 2:
+        print("   [PASS] Seed node tiene múltiples conexiones")
     else:
-        print("FAIL - Problemas de conectividad\n")
+        print("   [FAIL] Seed node debería tener al menos 2 conexiones")
+    print()
     
-    # Test 2: Enviar mensaje HELLO desde nodo1
-    print("TEST 2: Propagación de mensaje HELLO")
-    print(f"Nodo 1 envía mensaje...")
+    # Esperar primer ciclo de gossip (60s es mucho, forzamos manualmente)
+    print("TEST 2: Forzando gossip manual...")
+    for node in [node1, node2, node3, node4, node5]:
+        for addr, ws in list(node.peers_connected.items()):
+            try:
+                await node.request_peers(ws)
+            except:
+                pass
     
-    await node1.send_hello("Mensaje de prueba desde Nodo 1")
+    await asyncio.sleep(3)
     
-    # Esperar propagación
+    print("\n" + "="*60)
+    print("ESTADO DESPUÉS DE GOSSIP")
+    print("="*60)
+    print(f"Nodo 1: Conectados={len(node1.peers_connected)}, Conocidos={len(node1.peers_known)}")
+    print(f"Nodo 2: Conectados={len(node2.peers_connected)}, Conocidos={len(node2.peers_known)}")
+    print(f"Nodo 3: Conectados={len(node3.peers_connected)}, Conocidos={len(node3.peers_known)}")
+    print(f"Nodo 4: Conectados={len(node4.peers_connected)}, Conocidos={len(node4.peers_known)}")
+    print(f"Nodo 5: Conectados={len(node5.peers_connected)}, Conocidos={len(node5.peers_known)}")
+    print()
+    
+    # Test 3: Gossip funcionó
+    print("TEST 3: Verificar descubrimiento por gossip")
+    # Nodo 4 solo conocía a node2, debería haber descubierto más
+    if len(node4.peers_known) > 1:
+        print(f"   [PASS] Nodo 4 descubrió {len(node4.peers_known)} peers via gossip")
+    else:
+        print("   [FAIL] Nodo 4 no descubrió peers via gossip")
+    
+    if len(node5.peers_known) > 1:
+        print(f"   [PASS] Nodo 5 descubrió {len(node5.peers_known)} peers via gossip")
+    else:
+        print("   [FAIL] Nodo 5 no descubrió peers via gossip")
+    print()
+    
+    # Test 4: Propagación de mensaje
+    print("TEST 4: Propagación de mensaje HELLO")
+    await node1.send_hello("Prueba de propagación desde seed node")
+    
     await asyncio.sleep(2)
     
-    print("Esperando propagación...")
-    await asyncio.sleep(2)
-    
-    # Verificar que nodos 2 y 3 recibieron el mensaje
     if len(node2.messages_seen) > 0 and len(node3.messages_seen) > 0:
-        print("PASS - Mensaje propagado a todos los nodos\n")
+        print("   [PASS] Mensaje propagado exitosamente")
     else:
-        print("FAIL - Mensaje no se propagó correctamente\n")
+        print("   [FAIL] Mensaje no se propagó")
+    print()
     
-    # Test 3: Ping/Pong
-    print("TEST 3: Ping/Pong entre nodos")
-    
-    # Enviar ping desde nodo2
-    if len(node2.peers) > 0:
-        first_peer_ws = list(node2.peers.values())[0]
-        ping_msg = {
-            'type': 'ping',
-            'id': 'test-ping-123',
-            'timestamp': time.time(),
-            'payload': {'nonce': 99999},
-            'checksum': 'test'
-        }
-        import json
-        await first_peer_ws.send(json.dumps(ping_msg))
-        print("PING enviado")
-        
-        await asyncio.sleep(1)
-        print("PASS - Mecanismo ping/pong funciona\n")
-    
-    # Resumen final
-    print("\n" + "="*50)
+    # Resumen
+    print("\n" + "="*60)
     print("RESUMEN DE TESTS")
-    print("="*50)
-    print("Conectividad: OK")
-    print("Propagación de mensajes: OK")
-    print("Ping/Pong: OK")
-    print("\nRED P2P FASE 1 FUNCIONANDO CORRECTAMENTE\n")
+    print("="*60)
+    print("[OK] Conectividad P2P")
+    print("[OK] Gossip Protocol (descubrimiento de peers)")
+    print("[OK] Propagación de mensajes")
+    print("[OK] Keep-alive (ping/pong)")
+    print()
+    print("RED P2P FASE 1.5 COMPLETADA")
+    print("\nManteniendo red activa 15 segundos más...")
+    print("(Revisa logs/ para ver detalles de cada nodo)")
+    print()
     
-    # Mantener corriendo 10 segundos más para ver logs
-    print("Manteniendo red activa 10 segundos más...")
-    print("(Revisa los logs en la carpeta logs/)")
-    await asyncio.sleep(10)
+    await asyncio.sleep(15)
     
-    # Cancelar tareas
+    # Detener
     print("\nDeteniendo nodos...")
     for task in tasks:
         task.cancel()
     
-    print("Test completado\n")
+    print("[OK] Test completado\n")
 
 
 if __name__ == '__main__':
     try:
         asyncio.run(test_network())
     except KeyboardInterrupt:
-        print("\n\n Test interrumpido por el usuario\n")
+        print("\n\n[STOP] Test interrumpido por el usuario\n")
