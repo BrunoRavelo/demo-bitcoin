@@ -1,5 +1,5 @@
 """
-Tests para Wallet (criptografía ECDSA)
+Tests para Wallet (criptografía EdDSA Ed25519)
 """
 
 import pytest
@@ -33,8 +33,8 @@ def test_get_public_key_hex():
     
     assert isinstance(pub_hex, str)
     assert len(pub_hex) > 0
-    # Public key en formato uncompressed (65 bytes = 130 hex chars)
-    assert len(pub_hex) == 130
+    # Ed25519: public key = 32 bytes = 64 caracteres hex
+    assert len(pub_hex) == 64
 
 
 def test_sign_transaction():
@@ -46,6 +46,8 @@ def test_sign_transaction():
     
     assert isinstance(signature, str)
     assert len(signature) > 0
+    # Ed25519: firma = 64 bytes = 128 caracteres hex
+    assert len(signature) == 128
 
 
 def test_verify_valid_signature():
@@ -101,9 +103,35 @@ def test_verify_invalid_signature_corrupted():
     
     signature = wallet.sign_transaction(data)
     
-    # Corromper signature
+    # Corromper signature (cambiar últimos 4 caracteres)
     corrupted_sig = signature[:-4] + "0000"
     
     is_valid = Wallet.verify_signature(data, wallet.get_public_key_hex(), corrupted_sig)
     
     assert not is_valid
+
+
+def test_deterministic_signatures():
+    """Ed25519 genera firmas determinísticas (mismo mensaje = misma firma)"""
+    wallet = Wallet()
+    data = {"message": "test deterministic"}
+    
+    # Firmar el mismo mensaje dos veces
+    signature1 = wallet.sign_transaction(data)
+    signature2 = wallet.sign_transaction(data)
+    
+    # Ed25519 es determinístico: misma firma
+    assert signature1 == signature2
+
+
+def test_different_messages_different_signatures():
+    """Mensajes diferentes producen firmas diferentes"""
+    wallet = Wallet()
+    
+    data1 = {"message": "first"}
+    data2 = {"message": "second"}
+    
+    signature1 = wallet.sign_transaction(data1)
+    signature2 = wallet.sign_transaction(data2)
+    
+    assert signature1 != signature2
