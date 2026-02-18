@@ -9,6 +9,7 @@ por ser más seguro, rápido y moderno. Los conceptos fundamentales
 
 from cryptography.hazmat.primitives.asymmetric import ed25519
 from cryptography.hazmat.primitives import serialization
+from Crypto.Hash import RIPEMD160
 import hashlib
 
 
@@ -37,31 +38,67 @@ class Wallet:
         # Generar dirección desde public key
         self.address = self._generate_address()
     
+    def _hash160(self, pub_bytes: bytes) -> bytes:
+        """SHA256 → RIPEMD160 (Hash160, igual que Bitcoin)"""
+        sha256 = hashlib.sha256(pub_bytes).digest()
+        h = RIPEMD160.new(sha256)
+        return h.digest()
+
+    def _checksum(self, payload: bytes) -> bytes:
+        """SHA256(SHA256(payload))[:4] - detecta errores tipográficos"""
+        return hashlib.sha256(hashlib.sha256(payload).digest()).digest()[:4]
+
+    def _base58check_encode(self, payload: bytes) -> str:
+        """Convierte bytes a string Base58Check (como Bitcoin)"""
+        alphabet = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'
+        
+        # Contar ceros iniciales (se convierten en '1')
+        count = 0
+        for byte in payload:
+            if byte == 0:
+                count += 1
+            else:
+                break
+        
+        # Convertir bytes a número entero
+        num = int.from_bytes(payload, 'big')
+        
+        # Convertir a Base58
+        result = ''
+        while num > 0:
+            num, remainder = divmod(num, 58)
+            result = alphabet[remainder] + result
+        
+        return '1' * count + result
+
     def _generate_address(self) -> str:
         """
-        Genera dirección desde public key
-        Proceso: SHA256(SHA256(public_key))[:20] en hex
-        
-        Nota: Bitcoin usa SHA256 -> RIPEMD160 -> Base58Check
-        Aquí simplificamos a double SHA256 para el demo
+        Genera address idéntica a Bitcoin:
+        SHA256 → RIPEMD160 → version byte → checksum → Base58Check
         
         Returns:
-            Dirección de 40 caracteres (20 bytes en hex)
+            Address ~34 caracteres, empieza con '1'
         """
-        # Serializar public key (32 bytes en Ed25519)
+        # Serializar public key (32 bytes)
         pub_bytes = self.public_key.public_bytes(
             encoding=serialization.Encoding.Raw,
             format=serialization.PublicFormat.Raw
         )
         
-        # Double SHA256 (como Bitcoin)
-        hash1 = hashlib.sha256(pub_bytes).digest()
-        hash2 = hashlib.sha256(hash1).digest()
+        # Hash160: SHA256 → RIPEMD160
+        hash160 = self._hash160(pub_bytes)
         
-        # Tomar primeros 20 bytes y convertir a hex
-        address = hash2[:20].hex()
+        # Version byte 0x00 = mainnet (como Bitcoin)
+        versioned = b'\x00' + hash160
         
-        return address
+        # Checksum: SHA256(SHA256(versioned))[:4]
+        checksum = self._checksum(versioned)
+        
+        # Payload final: version + hash160 + checksum
+        payload = versioned + checksum
+        
+        # Codificar en Base58Check
+        return self._base58check_encode(payload)
     
     def sign_transaction(self, tx_data: dict) -> str:
         """

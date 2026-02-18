@@ -7,13 +7,13 @@ from core.wallet import Wallet
 
 
 def test_create_wallet():
-    """Wallet se crea correctamente con llaves y dirección"""
     wallet = Wallet()
     
     assert wallet.private_key is not None
     assert wallet.public_key is not None
     assert wallet.address is not None
-    assert len(wallet.address) == 40  # 20 bytes en hex
+    assert 25 <= len(wallet.address) <= 34  # Base58Check variable
+    assert wallet.address[0] == '1'          # Mainnet siempre empieza con '1'
     assert isinstance(wallet.address, str)
 
 
