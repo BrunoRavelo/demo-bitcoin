@@ -1,5 +1,4 @@
 """
-Nodo P2P con Gossip Protocol - FASE 1.5
 Implementa descubrimiento de peers estilo Bitcoin
 """
 
@@ -12,6 +11,8 @@ from datetime import datetime, timedelta
 from utils.logger import setup_logger
 from network.protocol import create_message, validate_message
 from network.peer_info import PeerInfo
+from core.transaction import Transaction  # ← AGREGAR
+from core.wallet import Wallet  # ← AGREGAR
 
 
 class P2PNode:
@@ -62,6 +63,11 @@ class P2PNode:
         self.GOSSIP_INTERVAL = 60           # Solicitar peers cada 60s
         self.PING_INTERVAL = 30             # Ping cada 30s
         self.CLEANUP_INTERVAL = 300         # Limpiar cada 5 min
+        
+        # Wallet y mempool (NUEVO)
+        self.wallet = Wallet()
+        self.mempool: List[Transaction] = []
+        self.balance = 100.0  # Balance inicial hardcoded
         
         # Logger
         self.logger = setup_logger(self.id)
@@ -266,11 +272,14 @@ class P2PNode:
         
         elif msg_type == 'addr':
             await self.handle_addr(msg['payload'])
-        
+
         elif msg_type == 'hello':
             data = msg['payload'].get('data', '')
             self.logger.info(f"[HELLO] HELLO recibido: {data}")
             await self.broadcast_message(msg, exclude_ws=sender_ws)
+        
+        elif msg_type == 'tx':  # ← AGREGAR
+            await self.handle_tx(msg, sender_ws)
         
         else:
             self.logger.warning(f"[WARN] Tipo de mensaje desconocido: {msg_type}")
@@ -446,3 +455,82 @@ class P2PNode:
                 
             except Exception as e:
                 self.logger.error(f"[ERROR] Error en cleanup: {e}")
+
+    # ==================== TRANSACCIONES ====================
+    
+    async def handle_tx(self, msg: dict, sender_ws):
+        """
+        Maneja TX recibida de la red
+        1. Deserializar
+        2. Validar
+        3. Evitar duplicados
+        4. Agregar a mempool
+        5. Propagar
+        """
+        try:
+            tx_data = msg['payload']
+            tx = Transaction.from_dict(tx_data)
+            
+            # Validar firma
+            if not tx.is_valid():
+                self.logger.warning(f"[TX] TX inválida recibida")
+                return
+            
+            # Evitar duplicados
+            tx_hash = tx.hash()
+            if any(t.hash() == tx_hash for t in self.mempool):
+                self.logger.info(f"[TX] TX duplicada ignorada: {tx_hash[:16]}...")
+                return
+            
+            # Agregar a mempool
+            self.mempool.append(tx)
+            self.logger.info(f"[TX] TX agregada al mempool: {tx_hash[:16]}... "
+                           f"({tx.from_address[:10]}...→{tx.to_address[:10]}..., {tx.amount})")
+            
+            # Propagar a otros peers (menos el que la envió)
+            await self.broadcast_transaction(tx, exclude_ws=sender_ws)
+            
+        except Exception as e:
+            self.logger.error(f"[TX] Error procesando TX: {e}")
+    
+    async def broadcast_transaction(self, tx: Transaction, exclude_ws=None):
+        """Propaga TX a todos los peers (menos uno)"""
+        msg = create_message('tx', tx.to_dict())
+        
+        for peer_addr, peer_ws in self.peers_connected.items():
+            if peer_ws == exclude_ws:
+                continue
+            
+            try:
+                await peer_ws.send(json.dumps(msg))
+            except Exception as e:
+                self.logger.error(f"[TX] Error propagando a {peer_addr}: {e}")
+    
+    def create_transaction(self, to_address: str, amount: float) -> Transaction:
+        """
+        Crea TX desde este nodo
+        """
+        tx = Transaction(
+            from_address=self.wallet.address,
+            to_address=to_address,
+            amount=amount
+        )
+        tx.sign(self.wallet)
+        
+        # Agregar a mempool local
+        self.mempool.append(tx)
+        self.logger.info(f"[TX] TX creada: {tx.hash()[:16]}... ({amount} → {to_address[:10]}...)")
+        
+        return tx
+    
+    def get_balance(self) -> float:
+        """Calcula balance simulado"""
+        balance = self.balance  # Inicial 100
+        
+        for tx in self.mempool:
+            if tx.from_address == self.wallet.address:
+                balance -= tx.amount
+            if tx.to_address == self.wallet.address:
+                balance += tx.amount
+        
+        return balance
