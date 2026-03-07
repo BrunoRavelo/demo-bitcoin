@@ -1,6 +1,5 @@
 # Documento Técnico de Arquitectura
 ## Demo Blockchain - MT
-
 ---
 
 ## 1. Visión General
@@ -1065,7 +1064,7 @@ pytest-cov==4.1.0        ← Coverage
 
 ## Documentación detallada
 
-La documentación técnica detallada de cada componente del sistema se encuentra disponible en el github , en donde se encuentran los archivos:
+La documentación técnica detallada de cada componente del sistema se encuentra disponible en el github https://github.com/BrunoRavelo/demo-bitcoin, en donde se encuentran los archivos:
 
 1. **DOC_core_wallet.md** - Sistema de wallets, Ed25519, Base58Check
 2. **DOC_core_transaction.md** - Estructura y validación de transacciones
