@@ -5,6 +5,9 @@ Sprint 3.3:
 - Todos los endpoints usan self.node.blockchain (un solo mempool)
 - self.node.loop ya está correctamente inicializado en P2PNode.start()
 - api_all_nodes() ahora consulta el seed en lugar de hardcodear 5 nodos
+
+Sprint 5.1:
+- Agrega POST /api/tx/create para el TxOrchestrator
 """
 
 import asyncio
@@ -45,12 +48,12 @@ class NodeDashboard:
         def api_info():
             """Resumen del nodo: wallet, red y blockchain."""
             return jsonify({
-                'node_id':      self.node.id,
-                'address':      self.node.wallet.address,
-                'balance':      self.node.get_balance(),
-                'peers_count':  len(self.node.peers_connected),
+                'node_id':       self.node.id,
+                'address':       self.node.wallet.address,
+                'balance':       self.node.get_balance(),
+                'peers_count':   len(self.node.peers_connected),
                 'mempool_count': len(self.node.blockchain.mempool),
-                'chain_height': len(self.node.blockchain.chain),
+                'chain_height':  len(self.node.blockchain.chain),
             })
 
         # ── API: wallet ────────────────────────────────────────
@@ -107,7 +110,6 @@ class NodeDashboard:
                     }
                     for p in peers
                 ]
-                # Agregar este mismo nodo al principio
                 nodes.insert(0, {
                     'name':     self.node.id + ' (este nodo)',
                     'host':     self.node.host,
@@ -117,24 +119,21 @@ class NodeDashboard:
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
 
-        # ── Enviar transacción ─────────────────────────────────
+        # ── Enviar TX (formulario HTML, modo manual) ───────────
 
         @self.app.route('/send_tx', methods=['POST'])
         def send_tx():
             """
-            Crear TX y propagarla a la red.
-            Usa run_coroutine_threadsafe porque Flask corre en un thread
-            distinto al event loop de asyncio.
+            Crear TX desde formulario HTML y propagarla a la red.
+            Acepta form data y redirige al dashboard.
+            Usado por el alumno desde su dashboard individual.
             """
             try:
                 to_address = request.form['to_address']
                 amount     = float(request.form['amount'])
 
-                # Crear y firmar TX (síncrono — solo lógica local)
                 tx = self.node.create_transaction(to_address, amount)
 
-                # Broadcast (asyncio desde thread de Flask)
-                # self.node.loop fue capturado en P2PNode.start()
                 asyncio.run_coroutine_threadsafe(
                     self.node.broadcast_transaction(tx),
                     self.node.loop,
@@ -143,10 +142,75 @@ class NodeDashboard:
                 return redirect('/')
 
             except ValueError as e:
-                # Balance insuficiente u otro error de validación
                 return f"Error: {e}", 400
             except Exception as e:
                 return f"Error inesperado: {e}", 500
+
+        # ── Crear TX via JSON (para TxOrchestrator) ────────────
+
+        @self.app.route('/api/tx/create', methods=['POST'])
+        def api_tx_create():
+            """
+            Crear TX via JSON y propagarla a la red.
+            Acepta JSON y retorna JSON.
+
+            A diferencia de /send_tx (form data + redirect),
+            este endpoint es llamado por el TxOrchestrator
+            para crear TXs automáticas programáticamente.
+            El nodo no distingue si la TX viene de un humano
+            o del orquestador — la procesa igual.
+
+            Body JSON:
+                {
+                    "to_address": "1A2B3C...",
+                    "amount": 10.0
+                }
+
+            Respuesta exitosa:
+                {
+                    "status": "ok",
+                    "txid":   "abcd1234...",
+                    "from":   "1X2Y3Z...",
+                    "to":     "1A2B3C...",
+                    "amount": 10.0
+                }
+            """
+            try:
+                data = request.get_json(silent=True)
+                if not data:
+                    return jsonify({'error': 'Body JSON requerido'}), 400
+
+                to_address = data.get('to_address')
+                amount     = data.get('amount')
+
+                if not to_address or amount is None:
+                    return jsonify({
+                        'error': 'to_address y amount son requeridos'
+                    }), 400
+
+                amount = float(amount)
+
+                # Crear y firmar TX (síncrono — lógica local)
+                tx = self.node.create_transaction(to_address, amount)
+
+                # Broadcast async desde thread Flask
+                asyncio.run_coroutine_threadsafe(
+                    self.node.broadcast_transaction(tx),
+                    self.node.loop,
+                )
+
+                return jsonify({
+                    'status': 'ok',
+                    'txid':   tx.hash(),
+                    'from':   tx.from_address,
+                    'to':     tx.to_address,
+                    'amount': tx.amount,
+                })
+
+            except ValueError as e:
+                return jsonify({'error': str(e)}), 400
+            except Exception as e:
+                return jsonify({'error': f'Error inesperado: {e}'}), 500
 
     # ──────────────────────────────────────────────────────────
     # Arranque
@@ -158,5 +222,5 @@ class NodeDashboard:
             host='0.0.0.0',
             port=self.dashboard_port,
             debug=False,
-            use_reloader=False,  # Evita doble inicio en thread
+            use_reloader=False,
         )

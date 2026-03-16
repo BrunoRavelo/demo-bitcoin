@@ -1,21 +1,21 @@
 """
 Seed Node — Servidor HTTP de descubrimiento de peers
-Equivalente funcional a los DNS seeds de Bitcoin
+Sprint 5.1: agrega endpoints de wallet addresses para el orquestador
 
-Responsabilidades:
-- Mantener lista de nodos activos en la red
-- Permitir que nodos se registren con su IP y puerto
-- Responder con lista de peers conocidos
-- Limpiar nodos inactivos automáticamente
+Endpoints:
+    GET  /health              — verificar estado
+    POST /register            — registrar nodo (IP + puerto)
+    GET  /peers               — obtener lista de peers activos
+    GET  /peers/all           — todos los peers (incluye inactivos)
+    POST /announce_address    — anunciar wallet address (para orquestador)
+    GET  /addresses           — obtener todas las wallet addresses activas
 
-Cómo funciona en relación a Bitcoin:
-- Bitcoin usa DNS real (consulta DNS del SO)
-- Nosotros usamos HTTP GET/POST (más simple, mismo propósito)
-- En ambos casos: la IP del seed es la única hardcodeada
-- En ambos casos: el seed arranca vacío, los nodos se anuncian solos
+Separación de responsabilidades:
+    /register + /peers  → lógica P2P (descubrimiento de nodos)
+    /announce_address + /addresses → lógica de orquestador (TXs automáticas)
 
-No tiene blockchain, no mina, no valida transacciones.
-Solo conoce IPs y puertos.
+Si el orquestador se elimina en el futuro, los endpoints /announce_address
+y /addresses se pueden quitar sin afectar el resto del sistema.
 """
 
 import time
@@ -27,84 +27,67 @@ from config import SEED_PORT, CLEANUP_INTERVAL
 
 class SeedNode:
     """
-    Servidor HTTP que mantiene el registro de nodos activos.
+    Servidor HTTP de descubrimiento de peers y wallet addresses.
 
-    Cada nodo al arrancar hace:
-        POST /register  → "aquí estoy, esta es mi IP y puerto"
-        GET  /peers     → "dame la lista de todos los que conoces"
-
-    El seed limpia automáticamente nodos que no han hecho
-    ping en los últimos PEER_TIMEOUT segundos.
+    Mantiene dos registros independientes:
+    - peers:     {addr: {host, port, node_id, last_seen}} — para P2P
+    - addresses: {addr: {wallet_address, node_id}}        — para orquestador
     """
 
-    # Nodo se considera inactivo si no hace ping en 5 minutos
-    PEER_TIMEOUT = 300
+    PEER_TIMEOUT = 300  # 5 minutos sin ping = inactivo
 
     def __init__(self, host: str = '0.0.0.0', port: int = SEED_PORT):
-        """
-        Inicializa el seed node.
-
-        Args:
-            host: IP donde escucha (0.0.0.0 = todas las interfaces)
-            port: Puerto HTTP (default: SEED_PORT de config.py)
-        """
         self.host = host
         self.port = port
 
-        # Registro de peers: {f"{ip}:{port}": {info}}
+        # Registro P2P
         self.peers: dict = {}
 
-        # Lock para acceso thread-safe desde Flask
-        self.lock = threading.Lock()
+        # Registro de wallet addresses (separado e independiente)
+        self.addresses: dict = {}  # {f"{host}:{port}": {wallet_address, node_id}}
 
-        self.logger = setup_logger('seed_node')
-        self.app = Flask(__name__)
+        self.lock    = threading.Lock()
+        self.logger  = setup_logger('seed_node')
+        self.app     = Flask(__name__)
         self._setup_routes()
 
-    # ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
     # Rutas HTTP
-    # ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
 
     def _setup_routes(self):
-        """Registra los endpoints HTTP del seed."""
+
+        # ── Health ─────────────────────────────────────────────
 
         @self.app.route('/health', methods=['GET'])
         def health():
-            """
-            Verificar que el seed está activo.
-            Los nodos pueden usar esto para confirmar conectividad.
-            """
             with self.lock:
-                count = len(self.peers)
+                peers_count     = len(self.peers)
+                addresses_count = len(self.addresses)
 
             return jsonify({
-                'status': 'ok',
-                'peers_count': count,
-                'timestamp': time.time()
+                'status':          'ok',
+                'peers_count':     peers_count,
+                'addresses_count': addresses_count,
+                'timestamp':       time.time(),
             })
+
+        # ── Registro P2P ───────────────────────────────────────
 
         @self.app.route('/register', methods=['POST'])
         def register():
             """
-            Un nodo anuncia su presencia al seed.
-
-            Body JSON esperado:
-                {
-                    "host": "192.168.1.X",
-                    "port": 5000,
-                    "node_id": "node_5000"   (opcional)
-                }
-
-            El seed guarda la IP, el puerto y el timestamp.
-            Si el nodo ya estaba registrado, actualiza su last_seen.
+            Nodo anuncia su presencia (IP + puerto).
+            Responsabilidad: descubrimiento P2P.
+            No incluye wallet_address — eso va en /announce_address.
             """
             data = request.get_json(silent=True)
 
             if not data:
                 return jsonify({'error': 'Body JSON requerido'}), 400
 
-            host = data.get('host')
-            port = data.get('port')
+            host    = data.get('host')
+            port    = data.get('port')
             node_id = data.get('node_id', f'node_{port}')
 
             if not host or not port:
@@ -120,34 +103,142 @@ class SeedNode:
             with self.lock:
                 is_new = addr not in self.peers
                 self.peers[addr] = {
-                    'host':      host,
-                    'port':      port,
-                    'node_id':   node_id,
-                    'last_seen': time.time(),
+                    'host':       host,
+                    'port':       port,
+                    'node_id':    node_id,
+                    'last_seen':  time.time(),
                     'first_seen': self.peers[addr]['first_seen'] if not is_new
-                                  else time.time()
+                                  else time.time(),
                 }
 
             if is_new:
                 self.logger.info(f"[REGISTER] Nuevo nodo: {addr} ({node_id})")
             else:
-                self.logger.debug(f"[PING] Nodo actualizado: {addr}")
+                self.logger.debug(f"[PING] Actualizado: {addr}")
 
             return jsonify({'status': 'ok', 'addr': addr})
 
+        # ── Peers ──────────────────────────────────────────────
+
         @self.app.route('/peers', methods=['GET'])
         def get_peers():
+            exclude_host = request.args.get('exclude_host')
+            exclude_port = request.args.get('exclude_port')
+
+            try:
+                exclude_port = int(exclude_port) if exclude_port else None
+            except ValueError:
+                exclude_port = None
+
+            with self.lock:
+                now          = time.time()
+                active_peers = []
+
+                for addr, info in self.peers.items():
+                    if now - info['last_seen'] > self.PEER_TIMEOUT:
+                        continue
+                    if (exclude_host and exclude_port and
+                            info['host'] == exclude_host and
+                            info['port'] == exclude_port):
+                        continue
+                    active_peers.append({
+                        'host':    info['host'],
+                        'port':    info['port'],
+                        'node_id': info['node_id'],
+                    })
+
+            return jsonify({'peers': active_peers, 'count': len(active_peers)})
+
+        @self.app.route('/peers/all', methods=['GET'])
+        def get_all_peers():
+            with self.lock:
+                all_peers = [
+                    {
+                        'host':       info['host'],
+                        'port':       info['port'],
+                        'node_id':    info['node_id'],
+                        'last_seen':  info['last_seen'],
+                        'first_seen': info['first_seen'],
+                        'active':     (time.time() - info['last_seen']) < self.PEER_TIMEOUT,
+                    }
+                    for info in self.peers.values()
+                ]
+            return jsonify({'peers': all_peers, 'count': len(all_peers)})
+
+        # ── Wallet addresses (para orquestador) ───────────────
+
+        @self.app.route('/announce_address', methods=['POST'])
+        def announce_address():
             """
-            Retorna la lista de nodos activos conocidos.
+            Nodo anuncia su wallet address al orquestador.
+
+            Completamente independiente de /register.
+            Si el orquestador se elimina, este endpoint se puede quitar
+            sin afectar el descubrimiento P2P.
+
+            Body JSON:
+                {
+                    "host":           "192.168.1.X",
+                    "port":           5000,
+                    "node_id":        "node_5000",
+                    "wallet_address": "1A2B3C..."
+                }
+            """
+            data = request.get_json(silent=True)
+
+            if not data:
+                return jsonify({'error': 'Body JSON requerido'}), 400
+
+            host           = data.get('host')
+            port           = data.get('port')
+            node_id        = data.get('node_id', f'node_{port}')
+            wallet_address = data.get('wallet_address')
+
+            if not all([host, port, wallet_address]):
+                return jsonify({'error': 'host, port y wallet_address son requeridos'}), 400
+
+            try:
+                port = int(port)
+            except (ValueError, TypeError):
+                return jsonify({'error': 'port debe ser un número'}), 400
+
+            addr = f"{host}:{port}"
+
+            with self.lock:
+                self.addresses[addr] = {
+                    'host':           host,
+                    'port':           port,
+                    'node_id':        node_id,
+                    'wallet_address': wallet_address,
+                    'registered_at':  time.time(),
+                }
+
+            self.logger.info(
+                f"[ADDRESS] Registrada: {addr} ({node_id}) "
+                f"→ {wallet_address[:16]}..."
+            )
+
+            return jsonify({'status': 'ok', 'addr': addr})
+
+        @self.app.route('/addresses', methods=['GET'])
+        def get_addresses():
+            """
+            Retorna todas las wallet addresses registradas.
+            Usado por el orquestador para saber a quién enviar TXs.
 
             Query params opcionales:
-                exclude_host: IP a excluir (para que el nodo no se devuelva a sí mismo)
+                exclude_host: IP a excluir
                 exclude_port: Puerto a excluir
 
             Respuesta:
                 {
-                    "peers": [
-                        {"host": "...", "port": ..., "node_id": "..."},
+                    "addresses": [
+                        {
+                            "host":           "192.168.1.X",
+                            "port":           5000,
+                            "node_id":        "node_5000",
+                            "wallet_address": "1A2B3C..."
+                        },
                         ...
                     ],
                     "count": N
@@ -162,121 +253,77 @@ class SeedNode:
                 exclude_port = None
 
             with self.lock:
-                now = time.time()
-                active_peers = []
-
-                for addr, info in self.peers.items():
-                    # Filtrar inactivos
-                    if now - info['last_seen'] > self.PEER_TIMEOUT:
+                result = []
+                for addr, info in self.addresses.items():
+                    if (exclude_host and exclude_port and
+                            info['host'] == exclude_host and
+                            info['port'] == exclude_port):
                         continue
-
-                    # Excluir el nodo que pregunta
-                    if exclude_host and exclude_port:
-                        if info['host'] == exclude_host and info['port'] == exclude_port:
-                            continue
-
-                    active_peers.append({
-                        'host':    info['host'],
-                        'port':    info['port'],
-                        'node_id': info['node_id']
+                    result.append({
+                        'host':           info['host'],
+                        'port':           info['port'],
+                        'node_id':        info['node_id'],
+                        'wallet_address': info['wallet_address'],
                     })
 
-            self.logger.debug(f"[PEERS] Retornando {len(active_peers)} peers activos")
+            return jsonify({'addresses': result, 'count': len(result)})
 
-            return jsonify({
-                'peers': active_peers,
-                'count': len(active_peers)
-            })
-
-        @self.app.route('/peers/all', methods=['GET'])
-        def get_all_peers():
-            """
-            Lista de TODOS los peers conocidos, incluyendo inactivos.
-            Solo para diagnóstico y el dashboard global del instructor.
-            """
-            with self.lock:
-                all_peers = [
-                    {
-                        'host':       info['host'],
-                        'port':       info['port'],
-                        'node_id':    info['node_id'],
-                        'last_seen':  info['last_seen'],
-                        'first_seen': info['first_seen'],
-                        'active':     (time.time() - info['last_seen']) < self.PEER_TIMEOUT
-                    }
-                    for info in self.peers.values()
-                ]
-
-            return jsonify({
-                'peers': all_peers,
-                'count': len(all_peers)
-            })
-
-    # ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
     # Limpieza automática
-    # ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
 
     def _cleanup_loop(self):
-        """
-        Loop en background que elimina nodos inactivos.
-        Corre en un thread separado.
-        Un nodo se considera inactivo si no hizo /register
-        en los últimos PEER_TIMEOUT segundos.
-        """
         while True:
             time.sleep(CLEANUP_INTERVAL)
             self._cleanup_inactive()
 
     def _cleanup_inactive(self):
-        """Elimina nodos que no han hecho ping recientemente."""
-        now = time.time()
+        """
+        Elimina peers inactivos del registro P2P.
+        Las wallet addresses NO se limpian automáticamente —
+        permanecen hasta que el seed se reinicia.
+        """
+        now       = time.time()
         to_remove = []
 
         with self.lock:
             for addr, info in self.peers.items():
                 if now - info['last_seen'] > self.PEER_TIMEOUT:
                     to_remove.append(addr)
-
             for addr in to_remove:
                 del self.peers[addr]
-                self.logger.info(f"[CLEANUP] Nodo inactivo eliminado: {addr}")
+                self.logger.info(f"[CLEANUP] Peer inactivo eliminado: {addr}")
 
         if to_remove:
             self.logger.info(
-                f"[CLEANUP] {len(to_remove)} nodos eliminados. "
+                f"[CLEANUP] {len(to_remove)} peers eliminados. "
                 f"Activos: {len(self.peers)}"
             )
 
-    # ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
     # Arranque
-    # ──────────────────────────────────────────────
+    # ──────────────────────────────────────────────────────────
 
     def run(self):
-        """
-        Inicia el seed node:
-        1. Arranca el loop de limpieza en background
-        2. Arranca el servidor Flask
-        """
         self.logger.info(
-            f"[SEED] Seed node iniciando en http://{self.host}:{self.port}"
+            f"[SEED] Iniciando en http://{self.host}:{self.port}"
         )
-        self.logger.info(f"[SEED] Endpoints disponibles:")
-        self.logger.info(f"         GET  /health")
-        self.logger.info(f"         POST /register")
-        self.logger.info(f"         GET  /peers")
-        self.logger.info(f"         GET  /peers/all")
+        self.logger.info("[SEED] Endpoints:")
+        self.logger.info("         GET  /health")
+        self.logger.info("         POST /register")
+        self.logger.info("         GET  /peers")
+        self.logger.info("         GET  /peers/all")
+        self.logger.info("         POST /announce_address")
+        self.logger.info("         GET  /addresses")
 
-        # Cleanup en background
         cleanup_thread = threading.Thread(
-            target=self._cleanup_loop,
-            daemon=True
+            target=self._cleanup_loop, daemon=True
         )
         cleanup_thread.start()
 
-        # Servidor Flask
         self.app.run(
             host=self.host,
             port=self.port,
             debug=False,
-            use_reloader=False
+            use_reloader=False,
         )

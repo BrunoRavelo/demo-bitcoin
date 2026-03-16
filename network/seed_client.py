@@ -1,10 +1,10 @@
 """
 Seed Client — Cliente HTTP para comunicarse con el Seed Node
-Usado por cada P2PNode al arrancar para registrarse y obtener peers
+Sprint 5.1: agrega announce_address() y get_addresses()
 
-Separado de P2PNode para mantener responsabilidades claras:
-- SeedClient  → habla con el seed node (HTTP)
-- P2PNode     → habla con otros nodos (WebSocket)
+Separación de responsabilidades:
+    register() / get_peers()          → lógica P2P
+    announce_address() / get_addresses() → lógica de orquestador
 """
 
 import requests
@@ -17,10 +17,15 @@ class SeedClient:
     """
     Cliente HTTP para el seed node.
 
-    Uso típico en P2PNode:
-        client = SeedClient(node_id='node_5000', host='192.168.1.5', port=5000)
-        client.register()                    # anunciarse
-        peers = client.get_peers()           # obtener lista inicial
+    Uso en P2PNode:
+        client = SeedClient(node_id, host, port)
+        client.register()                          # al arrancar
+        client.announce_address(wallet_address)    # al arrancar (separado)
+        peers = client.get_peers()                 # obtener peers iniciales
+
+    Uso en TxOrchestrator:
+        client = SeedClient(...)
+        addresses = client.get_addresses()         # obtener wallets para TXs
     """
 
     def __init__(
@@ -29,30 +34,23 @@ class SeedClient:
         host:      str,
         port:      int,
         seed_host: str = SEED_HOST,
-        seed_port: int = SEED_PORT
+        seed_port: int = SEED_PORT,
     ):
-        """
-        Args:
-            node_id:   Identificador del nodo (ej: 'node_5000')
-            host:      IP propia del nodo (la que otros usarán para conectarse)
-            port:      Puerto P2P propio
-            seed_host: IP del seed node (de config.py)
-            seed_port: Puerto del seed node (de config.py)
-        """
-        self.node_id   = node_id
-        self.host      = host
-        self.port      = port
-        self.seed_url  = f"http://{seed_host}:{seed_port}"
-        self.logger    = setup_logger(node_id)
+        self.node_id  = node_id
+        self.host     = host
+        self.port     = port
+        self.seed_url = f"http://{seed_host}:{seed_port}"
+        self.logger   = setup_logger(node_id)
 
     # ──────────────────────────────────────────────
-    # Métodos públicos
+    # Lógica P2P
     # ──────────────────────────────────────────────
 
     def register(self) -> bool:
         """
-        Registra este nodo en el seed.
+        Registra este nodo en el seed (IP + puerto).
         Llamar al arrancar y periódicamente como keep-alive.
+        NO incluye wallet_address — eso va en announce_address().
 
         Returns:
             True si el registro fue exitoso.
@@ -63,32 +61,27 @@ class SeedClient:
                 json={
                     'host':    self.host,
                     'port':    self.port,
-                    'node_id': self.node_id
+                    'node_id': self.node_id,
                 },
-                timeout=5
+                timeout=5,
             )
             if response.status_code == 200:
-                self.logger.info(
-                    f"[SEED] Registrado en seed {self.seed_url}"
-                )
+                self.logger.info(f"[SEED] Registrado en {self.seed_url}")
                 return True
             else:
-                self.logger.warning(
-                    f"[SEED] Registro falló: {response.status_code}"
-                )
+                self.logger.warning(f"[SEED] Registro falló: {response.status_code}")
                 return False
 
         except requests.exceptions.ConnectionError:
             self.logger.warning(
-                f"[SEED] No se pudo conectar al seed {self.seed_url} "
-                f"— continuando sin seed"
+                f"[SEED] No disponible {self.seed_url} — continuando sin seed"
             )
             return False
         except requests.exceptions.Timeout:
-            self.logger.warning(f"[SEED] Timeout al registrar en seed")
+            self.logger.warning("[SEED] Timeout al registrar")
             return False
         except Exception as e:
-            self.logger.error(f"[SEED] Error inesperado al registrar: {e}")
+            self.logger.error(f"[SEED] Error al registrar: {e}")
             return False
 
     def get_peers(self) -> List[dict]:
@@ -98,52 +91,133 @@ class SeedClient:
 
         Returns:
             Lista de dicts con 'host', 'port', 'node_id'.
-            Lista vacía si el seed no está disponible.
         """
         try:
             response = requests.get(
                 f"{self.seed_url}/peers",
                 params={
                     'exclude_host': self.host,
-                    'exclude_port': self.port
+                    'exclude_port': self.port,
                 },
-                timeout=5
+                timeout=5,
             )
             if response.status_code == 200:
-                data  = response.json()
-                peers = data.get('peers', [])
-                self.logger.info(
-                    f"[SEED] {len(peers)} peers obtenidos del seed"
-                )
+                peers = response.json().get('peers', [])
+                self.logger.info(f"[SEED] {len(peers)} peers obtenidos")
                 return peers
             else:
-                self.logger.warning(
-                    f"[SEED] get_peers falló: {response.status_code}"
-                )
+                self.logger.warning(f"[SEED] get_peers falló: {response.status_code}")
                 return []
 
         except requests.exceptions.ConnectionError:
-            self.logger.warning(
-                f"[SEED] Seed no disponible — iniciando sin peers del seed"
-            )
+            self.logger.warning("[SEED] Seed no disponible")
             return []
         except Exception as e:
             self.logger.error(f"[SEED] Error obteniendo peers: {e}")
             return []
 
     def is_seed_available(self) -> bool:
-        """
-        Verifica si el seed está activo.
-        Útil para diagnóstico y el dashboard.
-
-        Returns:
-            True si el seed responde en /health.
-        """
+        """Verifica si el seed está activo."""
         try:
-            response = requests.get(
-                f"{self.seed_url}/health",
-                timeout=3
-            )
+            response = requests.get(f"{self.seed_url}/health", timeout=3)
             return response.status_code == 200
         except Exception:
             return False
+
+    # ──────────────────────────────────────────────
+    # Lógica de orquestador (independiente del P2P)
+    # ──────────────────────────────────────────────
+
+    def announce_address(self, wallet_address: str) -> bool:
+        """
+        Anuncia la wallet address de este nodo al seed.
+
+        Completamente separado de register() — el seed almacena
+        estas addresses en un registro independiente.
+        Si el orquestador se elimina en el futuro, esta llamada
+        se quita sin afectar el registro P2P.
+
+        Args:
+            wallet_address: Address de la wallet del nodo (Base58Check).
+
+        Returns:
+            True si el anuncio fue exitoso.
+        """
+        try:
+            response = requests.post(
+                f"{self.seed_url}/announce_address",
+                json={
+                    'host':           self.host,
+                    'port':           self.port,
+                    'node_id':        self.node_id,
+                    'wallet_address': wallet_address,
+                },
+                timeout=5,
+            )
+            if response.status_code == 200:
+                self.logger.info(
+                    f"[SEED] Address anunciada: {wallet_address[:16]}..."
+                )
+                return True
+            else:
+                self.logger.warning(
+                    f"[SEED] announce_address falló: {response.status_code}"
+                )
+                return False
+
+        except requests.exceptions.ConnectionError:
+            self.logger.warning(
+                "[SEED] Seed no disponible para announce_address"
+            )
+            return False
+        except Exception as e:
+            self.logger.error(f"[SEED] Error en announce_address: {e}")
+            return False
+
+    def get_addresses(
+        self,
+        exclude_host: Optional[str] = None,
+        exclude_port: Optional[int] = None,
+    ) -> List[dict]:
+        """
+        Obtiene todas las wallet addresses registradas en el seed.
+        Usado por el TxOrchestrator para saber a quién enviar TXs.
+
+        Args:
+            exclude_host: IP a excluir de los resultados.
+            exclude_port: Puerto a excluir de los resultados.
+
+        Returns:
+            Lista de dicts con 'host', 'port', 'node_id', 'wallet_address'.
+            Lista vacía si el seed no está disponible.
+        """
+        try:
+            params = {}
+            if exclude_host:
+                params['exclude_host'] = exclude_host
+            if exclude_port:
+                params['exclude_port'] = exclude_port
+
+            response = requests.get(
+                f"{self.seed_url}/addresses",
+                params=params,
+                timeout=5,
+            )
+            if response.status_code == 200:
+                addresses = response.json().get('addresses', [])
+                self.logger.debug(
+                    f"[SEED] {len(addresses)} addresses obtenidas"
+                )
+                return addresses
+            else:
+                self.logger.warning(
+                    f"[SEED] get_addresses falló: {response.status_code}"
+                )
+                return []
+
+        except requests.exceptions.ConnectionError:
+            self.logger.warning("[SEED] Seed no disponible para get_addresses")
+            return []
+        except Exception as e:
+            self.logger.error(f"[SEED] Error en get_addresses: {e}")
+            return []

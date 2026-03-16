@@ -139,14 +139,31 @@ class P2PNode:
 
         await asyncio.Future()
 
+    # ── Método completo para reemplazar en p2p_node.py ────────────────────────
+
     async def _bootstrap_from_seed(self):
+        """
+        Registra en el seed y agrega los peers que devuelve.
+
+        Sprint 5.1: también anuncia la wallet address al seed
+        (llamada separada e independiente del registro P2P).
+        """
         loop = asyncio.get_running_loop()
+
+        # 1. Registro P2P (IP + puerto)
         registered = await loop.run_in_executor(None, self.seed_client.register)
 
         if not registered:
             self.logger.warning("[SEED] No disponible — usando solo bootstrap peers")
             return
 
+        # 2. Anunciar wallet address al orquestador (independiente del P2P)
+        await loop.run_in_executor(
+            None,
+            lambda: self.seed_client.announce_address(self.wallet.address)
+        )
+
+        # 3. Obtener peers iniciales
         peers_from_seed = await loop.run_in_executor(None, self.seed_client.get_peers)
 
         for peer_data in peers_from_seed:
@@ -157,11 +174,13 @@ class P2PNode:
                     peer_data['port'],
                     peer_data.get('node_id'),
                 )
-                self.logger.info(f"[SEED] Peer: {addr}")
+                self.logger.info(f"[SEED] Peer descubierto: {addr}")
 
         self.logger.info(
-            f"[SEED] {len(peers_from_seed)} peers. Total: {len(self.peers_known)}"
+            f"[SEED] {len(peers_from_seed)} peers del seed. "
+            f"Total conocidos: {len(self.peers_known)}"
         )
+
 
     async def seed_register_loop(self):
         await asyncio.sleep(30)
