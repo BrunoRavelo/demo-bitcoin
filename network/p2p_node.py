@@ -1,15 +1,16 @@
 """
 Nodo P2P completo
-Combina red WebSocket con lógica de blockchain
+Sprint 4.3 — Minado asíncrono con cancelación
 
-Sprint 4.1/4.2:
-- Handlers para MSG_BLOCK, MSG_INV, MSG_GETBLOCKS
-- broadcast_block() para propagar bloques minados
-- Sincronización de cadena al conectar a un peer nuevo
-- Longest chain rule via blockchain.replace_chain()
+Cambios:
+- start_mining_loop(): corre mine_block_cancellable() en executor thread
+- stop_mining() / pause_mining() / resume_mining(): control de modos
+- handle_block() cancela el minado activo y reinicia al recibir bloque externo
+- Tres modos: AUTO, MANUAL, PAUSED
 """
 
 import asyncio
+import threading
 import websockets
 import json
 from typing import Dict, Set, Optional
@@ -29,28 +30,25 @@ from core.block import Block
 from core.blockchain import Blockchain
 from core.wallet import Wallet
 from config import (
-    MAX_OUTBOUND_CONNECTIONS,
-    MAX_INBOUND_CONNECTIONS,
-    MAX_PEERS_TO_SHARE,
-    GOSSIP_INTERVAL,
-    PING_INTERVAL,
-    CLEANUP_INTERVAL,
-    CONNECT_TIMEOUT,
-    SEED_HOST,
-    SEED_PORT,
+    MAX_OUTBOUND_CONNECTIONS, MAX_INBOUND_CONNECTIONS, MAX_PEERS_TO_SHARE,
+    GOSSIP_INTERVAL, PING_INTERVAL, CLEANUP_INTERVAL, CONNECT_TIMEOUT,
+    SEED_HOST, SEED_PORT, MINING_AUTO_START,
 )
+
+# Modos de minado
+MINING_AUTO   = 'auto'    # Mina continuamente, reinicia al recibir bloque externo
+MINING_MANUAL = 'manual'  # Solo mina cuando se llama mine_once()
+MINING_PAUSED = 'paused'  # No mina, pero sigue conectado a la red
 
 
 class P2PNode:
     """
-    Nodo P2P completo: red + blockchain.
+    Nodo P2P completo con minado asíncrono.
 
-    Responsabilidades:
-    - Servidor/cliente WebSocket
-    - Gossip protocol
-    - Propagación de TXs y bloques
-    - Sincronización de cadena al conectar
-    - Longest chain rule via Blockchain.replace_chain()
+    El minado corre en un thread separado del executor para no bloquear
+    el event loop de asyncio. Cuando llega un bloque externo válido,
+    se activa un threading.Event que cancela el PoW en curso, y el
+    loop de minado reinicia automáticamente con el nuevo prev_hash.
     """
 
     def __init__(
@@ -94,6 +92,19 @@ class P2PNode:
         )
 
         self.loop: Optional[asyncio.AbstractEventLoop] = None
+
+        # ── Control de minado ──────────────────────────────────
+        # Modo actual: AUTO, MANUAL o PAUSED
+        self.mining_mode: str = MINING_AUTO if MINING_AUTO_START else MINING_PAUSED
+
+        # Event para cancelar el PoW en curso desde el event loop
+        # Se activa cuando llega un bloque externo o se pausa el minado
+        self._stop_mining_event = threading.Event()
+
+        # Stats de minado (para el dashboard)
+        self.blocks_mined:   int   = 0
+        self.mining_rewards: float = 0.0
+
         self.logger = setup_logger(self.id)
 
     # ──────────────────────────────────────────────────────────
@@ -105,7 +116,7 @@ class P2PNode:
 
         self.logger.info(f"[INIT] Iniciando {self.id} en {self.host}:{self.port}")
         self.logger.info(f"[WALLET] Address: {self.wallet.address}")
-        self.logger.info(f"[CHAIN] Altura inicial: {self.blockchain.get_height()}")
+        self.logger.info(f"[MINING] Modo inicial: {self.mining_mode}")
 
         await self._bootstrap_from_seed()
 
@@ -121,6 +132,10 @@ class P2PNode:
         asyncio.create_task(self.ping_loop())
         asyncio.create_task(self.cleanup_loop())
         asyncio.create_task(self.seed_register_loop())
+
+        # Arrancar minado si el modo inicial es AUTO
+        if self.mining_mode == MINING_AUTO:
+            asyncio.create_task(self.start_mining_loop())
 
         await asyncio.Future()
 
@@ -142,11 +157,10 @@ class P2PNode:
                     peer_data['port'],
                     peer_data.get('node_id'),
                 )
-                self.logger.info(f"[SEED] Peer descubierto: {addr}")
+                self.logger.info(f"[SEED] Peer: {addr}")
 
         self.logger.info(
-            f"[SEED] {len(peers_from_seed)} peers del seed. "
-            f"Total conocidos: {len(self.peers_known)}"
+            f"[SEED] {len(peers_from_seed)} peers. Total: {len(self.peers_known)}"
         )
 
     async def seed_register_loop(self):
@@ -156,8 +170,146 @@ class P2PNode:
                 loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, self.seed_client.register)
             except Exception as e:
-                self.logger.warning(f"[SEED] Error en re-registro: {e}")
+                self.logger.warning(f"[SEED] Re-registro: {e}")
             await asyncio.sleep(self.CLEANUP_INTERVAL)
+
+    # ──────────────────────────────────────────────────────────
+    # Control de minado
+    # ──────────────────────────────────────────────────────────
+
+    async def start_mining_loop(self):
+        """
+        Loop de minado automático.
+
+        Corre indefinidamente en modo AUTO:
+        1. Limpia el stop_event
+        2. Lanza mine_block_cancellable() en el executor thread
+        3. Si retorna un bloque → broadcast + actualizar stats
+        4. Si retorna None → fue cancelado (bloque externo llegó)
+        5. En ambos casos, reiniciar desde el paso 1
+
+        El executor thread NO bloquea el event loop — asyncio sigue
+        procesando mensajes de red mientras se mina.
+        """
+        self.logger.info("[MINING] Loop automático iniciado")
+
+        while self.mining_mode == MINING_AUTO:
+            # Limpiar flag de cancelación para este intento
+            self._stop_mining_event.clear()
+
+            self.logger.info(
+                f"[MINING] Iniciando intento "
+                f"(altura={self.blockchain.get_height()})..."
+            )
+
+            try:
+                # Minar en thread separado — no bloquea asyncio
+                loop  = asyncio.get_running_loop()
+                block = await loop.run_in_executor(
+                    None,
+                    self.blockchain.mine_block_cancellable,
+                    self.wallet.address,
+                    self._stop_mining_event,
+                )
+
+                if block is not None:
+                    # ¡Bloque encontrado! Actualizar stats y propagar
+                    self.blocks_mined   += 1
+                    self.mining_rewards += self.blockchain.BLOCK_REWARD
+
+                    self.logger.info(
+                        f"[MINING] ¡Bloque #{self.blockchain.get_height()} minado! "
+                        f"Hash: {block.hash[:16]}... "
+                        f"(total minados: {self.blocks_mined})"
+                    )
+
+                    await self.broadcast_block(block)
+
+                # Si block es None → fue cancelado, el loop reinicia
+                # automáticamente con el nuevo prev_hash
+
+            except Exception as e:
+                self.logger.error(f"[MINING] Error en loop: {e}")
+                await asyncio.sleep(1)  # Breve pausa antes de reintentar
+
+        self.logger.info(f"[MINING] Loop detenido (modo={self.mining_mode})")
+
+    async def mine_once(self):
+        """
+        Mina exactamente un bloque (modo MANUAL).
+
+        No lanza un loop — mina un bloque y retorna.
+        Llamado desde el dashboard cuando el usuario presiona "Minar".
+        """
+        if self.mining_mode == MINING_PAUSED:
+            self.logger.warning("[MINING] No se puede minar en modo PAUSED")
+            return None
+
+        self.logger.info("[MINING] Minado manual iniciado...")
+        self._stop_mining_event.clear()
+
+        try:
+            loop  = asyncio.get_running_loop()
+            block = await loop.run_in_executor(
+                None,
+                self.blockchain.mine_block_cancellable,
+                self.wallet.address,
+                self._stop_mining_event,
+            )
+
+            if block is not None:
+                self.blocks_mined   += 1
+                self.mining_rewards += self.blockchain.BLOCK_REWARD
+                self.logger.info(
+                    f"[MINING] Bloque manual minado: {block.hash[:16]}..."
+                )
+                await self.broadcast_block(block)
+
+            return block
+
+        except Exception as e:
+            self.logger.error(f"[MINING] Error en mine_once: {e}")
+            return None
+
+    def set_mining_mode(self, mode: str):
+        """
+        Cambia el modo de minado.
+
+        Transiciones válidas:
+        AUTO   → MANUAL, PAUSED
+        MANUAL → AUTO, PAUSED
+        PAUSED → AUTO, MANUAL
+
+        Args:
+            mode: MINING_AUTO, MINING_MANUAL o MINING_PAUSED
+        """
+        if mode not in (MINING_AUTO, MINING_MANUAL, MINING_PAUSED):
+            raise ValueError(f"Modo inválido: {mode}")
+
+        old_mode = self.mining_mode
+        self.mining_mode = mode
+
+        self.logger.info(f"[MINING] Modo: {old_mode} → {mode}")
+
+        # Si había minado activo, cancelarlo
+        if old_mode == MINING_AUTO:
+            self._stop_mining_event.set()
+
+        # Si el nuevo modo es AUTO, arrancar el loop
+        if mode == MINING_AUTO and self.loop is not None:
+            asyncio.run_coroutine_threadsafe(
+                self.start_mining_loop(),
+                self.loop,
+            )
+
+    def _cancel_current_mining(self):
+        """
+        Cancela el PoW en curso activando el stop_event.
+        El thread de minado retornará None en su próxima verificación.
+        """
+        if not self._stop_mining_event.is_set():
+            self._stop_mining_event.set()
+            self.logger.info("[MINING] PoW cancelado (bloque externo recibido)")
 
     # ──────────────────────────────────────────────────────────
     # Conexiones entrantes
@@ -261,9 +413,6 @@ class P2PNode:
 
                 asyncio.create_task(self.listen_to_peer(websocket, addr))
                 await self.request_peers(websocket)
-
-                # ── Sincronización de cadena al conectar ──────
-                # Solicitar cadena del peer para aplicar longest chain rule
                 await self._request_chain_sync(websocket)
 
         except asyncio.TimeoutError:
@@ -293,7 +442,6 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def handle_message(self, msg: dict, sender_ws):
-        """Despacha mensajes. Anti-loop por msg_id."""
         msg_id   = msg['id']
         msg_type = msg['type']
 
@@ -333,7 +481,6 @@ class P2PNode:
         ]
         valid.sort(key=lambda p: p.last_seen, reverse=True)
         share = valid[:self.MAX_PEERS_TO_SHARE]
-
         msg = create_message(MSG_ADDR, {
             'peers': [p.to_dict() for p in share],
             'count': len(share),
@@ -343,7 +490,6 @@ class P2PNode:
     async def handle_addr(self, payload: dict):
         peers_data = payload.get('peers', [])
         new_count  = 0
-
         for peer_data in peers_data:
             addr = f"{peer_data['host']}:{peer_data['port']}"
             if (peer_data['port'] == self.port and
@@ -357,72 +503,70 @@ class P2PNode:
                 self.peers_known[addr].last_seen = peer_data.get(
                     'last_seen', datetime.now().timestamp()
                 )
-
         if new_count > 0:
-            self.logger.info(
-                f"[GOSSIP] {new_count} nuevos. Total: {len(self.peers_known)}"
-            )
+            self.logger.info(f"[GOSSIP] {new_count} nuevos. Total: {len(self.peers_known)}")
             await self.connect_to_bootstrap()
 
     # ──────────────────────────────────────────────────────────
-    # Handlers — bloques (Sprint 4)
+    # Handlers — bloques
     # ──────────────────────────────────────────────────────────
 
     async def handle_block(self, msg: dict, sender_ws):
         """
-        Procesa un bloque recibido de la red.
+        Procesa bloque recibido de la red.
 
-        Flujo:
-        1. Deserializar bloque
-        2. Intentar agregar directamente (conecta con nuestro tip)
-        3. Si no conecta → solicitar cadena completa al peer
-           para aplicar longest chain rule
-        4. Si se aceptó → propagarlo al resto de la red
+        Si el bloque es válido y se agrega a la cadena:
+        → cancelar minado activo (el prev_hash cambió)
+        → el loop de minado reiniciará automáticamente
+
+        Si no conecta con nuestro tip:
+        → solicitar cadena completa para longest chain rule
         """
         try:
-            block_data = msg['payload']
-            block      = Block.from_dict(block_data)
+            payload = msg['payload']
+
+            # Cadena completa (respuesta a getblocks)
+            if payload.get('type') == 'full_chain':
+                chain_data = payload.get('chain', [])
+                replaced   = self._process_full_chain(chain_data)
+
+                if replaced:
+                    # La cadena cambió — cancelar minado actual
+                    self._cancel_current_mining()
+                return
+
+            # Bloque individual
+            block      = Block.from_dict(payload)
             block_hash = block.hash
 
             self.logger.info(
                 f"[BLOCK] Recibido: {block_hash[:16]}... "
-                f"(prev={block.header.prev_hash[:16]}..., "
-                f"txs={len(block.transactions)})"
+                f"(txs={len(block.transactions)})"
             )
 
-            # Intentar agregar directamente
             if self.blockchain.add_block(block):
                 self.logger.info(
-                    f"[BLOCK] Aceptado en altura {self.blockchain.get_height()}"
+                    f"[BLOCK] Aceptado. Nueva altura: {self.blockchain.get_height()}"
                 )
-                # Propagar al resto de la red (excepto quien lo envió)
+
+                # ── Cancelar minado activo ────────────────────
+                # El prev_hash cambió — el bloque en el que estábamos
+                # trabajando ya no es válido. El loop reiniciará solo.
+                self._cancel_current_mining()
+
+                # Propagar al resto
                 await self.broadcast_block(block, exclude_ws=sender_ws)
 
             else:
-                # No conectó con nuestro tip — puede ser fork
-                # Solicitar cadena completa para aplicar longest chain rule
                 self.logger.info(
-                    f"[BLOCK] No conecta con nuestro tip "
-                    f"(altura={self.blockchain.get_height()}) — "
-                    f"solicitando cadena completa"
+                    f"[BLOCK] No conecta — solicitando sincronización"
                 )
                 await self._request_chain_sync(sender_ws)
 
         except Exception as e:
-            self.logger.error(f"[BLOCK] Error procesando bloque: {e}")
+            self.logger.error(f"[BLOCK] Error: {e}")
 
     async def handle_inv(self, msg: dict, sender_ws):
-        """
-        Procesa anuncio INV: el peer nos avisa que tiene un bloque nuevo.
-
-        INV es más eficiente que enviar el bloque completo directamente:
-        el peer anuncia el hash, nosotros pedimos el bloque completo
-        solo si no lo tenemos.
-
-        En Bitcoin real: inv → getdata → block
-        En nuestro demo: inv → getblocks (pedimos cadena completa si el
-        hash no está en nuestra cadena)
-        """
         try:
             inv_hash   = msg['payload'].get('hash')
             inv_height = msg['payload'].get('height', 0)
@@ -430,17 +574,14 @@ class P2PNode:
             if not inv_hash:
                 return
 
-            # Si ya tenemos ese bloque, ignorar
             if self.blockchain.get_block_by_hash(inv_hash):
-                self.logger.debug(f"[INV] Bloque ya conocido: {inv_hash[:16]}...")
+                self.logger.debug(f"[INV] Ya conocido: {inv_hash[:16]}...")
                 return
 
-            # Si el peer tiene más bloques que nosotros, sincronizar
             if inv_height > self.blockchain.get_height():
                 self.logger.info(
-                    f"[INV] Peer tiene bloque {inv_hash[:16]}... "
-                    f"(altura {inv_height} > nuestra {self.blockchain.get_height()}) "
-                    f"— sincronizando"
+                    f"[INV] Peer tiene altura {inv_height} > "
+                    f"nuestra {self.blockchain.get_height()} — sincronizando"
                 )
                 await self._request_chain_sync(sender_ws)
 
@@ -448,77 +589,40 @@ class P2PNode:
             self.logger.error(f"[INV] Error: {e}")
 
     async def handle_getblocks(self, sender_ws):
-        """
-        Responde a getblocks enviando nuestra cadena completa.
-
-        En Bitcoin real: getblocks → inv (lista de hashes) → getdata → blocks
-        En nuestro demo: getblocks → block (cadena completa serializada)
-        Simplificación válida para redes pequeñas (<100 bloques).
-        """
         try:
             chain_data = self.blockchain.get_chain_as_dicts()
-
             msg = create_message(MSG_BLOCK, {
                 'chain':  chain_data,
                 'height': self.blockchain.get_height(),
                 'type':   'full_chain',
             })
             await sender_ws.send(json.dumps(msg))
-
             self.logger.info(
                 f"[GETBLOCKS] Cadena enviada: {self.blockchain.get_height()} bloques"
             )
-
         except Exception as e:
-            self.logger.error(f"[GETBLOCKS] Error enviando cadena: {e}")
+            self.logger.error(f"[GETBLOCKS] Error: {e}")
 
     async def _request_chain_sync(self, websocket):
-        """
-        Solicita la cadena completa a un peer para sincronizar.
-        Si la cadena recibida es más larga y válida, reemplaza la nuestra.
-        """
         try:
-            getblocks_msg = create_message(MSG_GETBLOCKS, {
+            msg = create_message(MSG_GETBLOCKS, {
                 'height': self.blockchain.get_height(),
             })
-            await websocket.send(json.dumps(getblocks_msg))
-            self.logger.debug(
-                f"[SYNC] getblocks enviado "
-                f"(nuestra altura: {self.blockchain.get_height()})"
-            )
+            await websocket.send(json.dumps(msg))
         except Exception as e:
-            self.logger.error(f"[SYNC] Error solicitando cadena: {e}")
+            self.logger.error(f"[SYNC] Error: {e}")
 
     def _process_full_chain(self, chain_data: list) -> bool:
-        """
-        Procesa una cadena completa recibida vía getblocks.
-        Aplica longest chain rule.
-
-        Args:
-            chain_data: Lista de dicts de bloques.
-
-        Returns:
-            True si la cadena fue aceptada y reemplazó la nuestra.
-        """
         try:
             new_chain = Blockchain.chain_from_dicts(chain_data)
             replaced  = self.blockchain.replace_chain(new_chain)
-
             if replaced:
                 self.logger.info(
-                    f"[SYNC] Cadena reemplazada. "
-                    f"Nueva altura: {self.blockchain.get_height()}"
+                    f"[SYNC] Cadena reemplazada. Altura: {self.blockchain.get_height()}"
                 )
-            else:
-                self.logger.debug(
-                    f"[SYNC] Nuestra cadena sigue siendo la más larga "
-                    f"({self.blockchain.get_height()} bloques)"
-                )
-
             return replaced
-
         except Exception as e:
-            self.logger.error(f"[SYNC] Error procesando cadena: {e}")
+            self.logger.error(f"[SYNC] Error: {e}")
             return False
 
     # ──────────────────────────────────────────────────────────
@@ -526,31 +630,18 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def broadcast_block(self, block: Block, exclude_ws=None):
-        """
-        Propaga un bloque minado a todos los peers conectados.
-
-        Flujo Bitcoin real: minar → inv (anunciar hash) → peers piden con getdata
-        Nuestro demo: minar → block (enviar completo directamente)
-        Simplificación válida para bloques pequeños en red LAN.
-
-        Args:
-            block:      Bloque a propagar.
-            exclude_ws: WebSocket a excluir (quien nos lo envió).
-        """
-        # Anunciar primero con INV (hash + altura)
         inv_msg = create_message(MSG_INV, {
             'hash':   block.hash,
             'height': self.blockchain.get_height(),
         })
         await self.broadcast_message(inv_msg, exclude_ws=exclude_ws)
 
-        # Enviar bloque completo
         block_msg = create_message(MSG_BLOCK, block.to_dict())
         await self.broadcast_message(block_msg, exclude_ws=exclude_ws)
 
         self.logger.info(
             f"[BROADCAST] Bloque {block.hash[:16]}... "
-            f"propagado a {len(self.peers_connected)} peers"
+            f"→ {len(self.peers_connected)} peers"
         )
 
     # ──────────────────────────────────────────────────────────
@@ -561,15 +652,9 @@ class P2PNode:
         try:
             tx       = Transaction.from_dict(msg['payload'])
             accepted = self.blockchain.add_transaction_to_mempool(tx)
-
             if accepted:
-                self.logger.info(
-                    f"[TX] Aceptada: {tx.short_hash()} ({tx.amount} coins)"
-                )
+                self.logger.info(f"[TX] Aceptada: {tx.short_hash()} ({tx.amount})")
                 await self.broadcast_transaction(tx, exclude_ws=sender_ws)
-            else:
-                self.logger.debug(f"[TX] Rechazada: {tx.short_hash()}")
-
         except Exception as e:
             self.logger.error(f"[TX] Error: {e}")
 
@@ -581,10 +666,8 @@ class P2PNode:
         if not self.blockchain.has_sufficient_balance(self.wallet.address, amount):
             raise ValueError(
                 f"Balance insuficiente: "
-                f"tienes {self.get_balance():.2f}, "
-                f"intentas enviar {amount}"
+                f"tienes {self.get_balance():.2f}, intentas enviar {amount}"
             )
-
         tx = Transaction(
             from_address=self.wallet.address,
             to_address=to_address,
@@ -592,17 +675,14 @@ class P2PNode:
         )
         tx.sign(self.wallet)
         self.blockchain.add_transaction_to_mempool(tx)
-
-        self.logger.info(
-            f"[TX] Creada: {tx.short_hash()} ({amount} → {to_address[:12]}...)"
-        )
+        self.logger.info(f"[TX] Creada: {tx.short_hash()} ({amount} → {to_address[:12]}...)")
         return tx
 
     def get_balance(self) -> float:
         return self.blockchain.get_balance(self.wallet.address)
 
     # ──────────────────────────────────────────────────────────
-    # Broadcast genérico y utilidades
+    # Broadcast genérico
     # ──────────────────────────────────────────────────────────
 
     async def broadcast_message(self, msg: dict, exclude_ws=None):
@@ -664,7 +744,6 @@ class P2PNode:
             try:
                 old = len(self.messages_seen)
                 self.messages_seen = set(list(self.messages_seen)[-500:])
-
                 now = datetime.now().timestamp()
                 to_remove = [
                     addr for addr, peer in self.peers_known.items()
@@ -672,7 +751,6 @@ class P2PNode:
                 ]
                 for addr in to_remove:
                     del self.peers_known[addr]
-
                 self.logger.info(
                     f"[CLEANUP] Mensajes: {old}→{len(self.messages_seen)}, "
                     f"Peers eliminados: {len(to_remove)}"
@@ -685,5 +763,6 @@ class P2PNode:
             f"P2PNode(id={self.id}, "
             f"peers={len(self.peers_connected)}, "
             f"height={self.blockchain.get_height()}, "
-            f"mempool={len(self.blockchain.mempool)})"
+            f"mining={self.mining_mode}, "
+            f"mined={self.blocks_mined})"
         )
