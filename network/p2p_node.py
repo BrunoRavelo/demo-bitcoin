@@ -2,13 +2,11 @@
 Nodo P2P completo
 Combina red WebSocket con lógica de blockchain
 
-Cambios Sprint 3.3:
-- Recibe Blockchain como dependencia (un solo mempool)
-- Integra SeedClient para descubrimiento inicial
-- Elimina self.mempool y self.balance hardcoded
-- Elimina mensaje 'hello' (era solo para testing)
-- self.loop capturado correctamente en start()
-- Wallet vive en el nodo (no en Blockchain)
+Sprint 4.1/4.2:
+- Handlers para MSG_BLOCK, MSG_INV, MSG_GETBLOCKS
+- broadcast_block() para propagar bloques minados
+- Sincronización de cadena al conectar a un peer nuevo
+- Longest chain rule via blockchain.replace_chain()
 """
 
 import asyncio
@@ -18,10 +16,16 @@ from typing import Dict, Set, Optional
 from datetime import datetime
 
 from utils.logger import setup_logger
-from network.protocol import create_message, validate_message
+from network.protocol import (
+    create_message, validate_message,
+    MSG_VERSION, MSG_VERACK, MSG_PING, MSG_PONG,
+    MSG_GETADDR, MSG_ADDR, MSG_TX,
+    MSG_INV, MSG_GETBLOCKS, MSG_BLOCK,
+)
 from network.peer_info import PeerInfo
 from network.seed_client import SeedClient
 from core.transaction import Transaction
+from core.block import Block
 from core.blockchain import Blockchain
 from core.wallet import Wallet
 from config import (
@@ -39,18 +43,14 @@ from config import (
 
 class P2PNode:
     """
-    Nodo P2P completo: red + blockchain
+    Nodo P2P completo: red + blockchain.
 
     Responsabilidades:
-    - Servidor WebSocket (recibe conexiones de otros nodos)
-    - Cliente WebSocket (se conecta a otros nodos)
-    - Gossip protocol (descubrimiento de peers)
-    - Propagación de transacciones (bloques en Sprint 4)
-    - Delegación de lógica de cadena a Blockchain
-
-    Separación de responsabilidades:
-    - P2PNode   → red, wallet propia, coordinación
-    - Blockchain → cadena, mempool, validación, balances
+    - Servidor/cliente WebSocket
+    - Gossip protocol
+    - Propagación de TXs y bloques
+    - Sincronización de cadena al conectar
+    - Longest chain rule via Blockchain.replace_chain()
     """
 
     def __init__(
@@ -60,26 +60,13 @@ class P2PNode:
         bootstrap_peers: list,
         blockchain:      Blockchain,
     ):
-        """
-        Args:
-            host:            IP o hostname donde escuchar
-            port:            Puerto WebSocket
-            bootstrap_peers: Lista de tuplas [(host, port)]
-            blockchain:      Instancia de Blockchain compartida
-        """
-        # ── Identidad ──────────────────────────────────────────
         self.id   = f"node_{port}"
         self.host = host
         self.port = port
 
-        # ── Blockchain (única fuente de verdad) ────────────────
         self.blockchain = blockchain
+        self.wallet     = Wallet()
 
-        # ── Wallet del nodo ────────────────────────────────────
-        # La wallet vive en el nodo — Blockchain no gestiona identidades
-        self.wallet = Wallet()
-
-        # ── Peers ──────────────────────────────────────────────
         self.peers_connected: Dict[str, websockets.WebSocketServerProtocol] = {}
         self.peers_known:     Dict[str, PeerInfo] = {}
 
@@ -87,21 +74,17 @@ class P2PNode:
             addr = f"{b_host}:{b_port}"
             self.peers_known[addr] = PeerInfo(b_host, b_port)
 
-        # ── Anti-loop ──────────────────────────────────────────
         self.messages_seen:    Set[str] = set()
         self.MAX_MESSAGES_SEEN = 1000
 
-        # ── Límites (estilo Bitcoin) ───────────────────────────
         self.MAX_OUTBOUND_CONNECTIONS = MAX_OUTBOUND_CONNECTIONS
         self.MAX_INBOUND_CONNECTIONS  = MAX_INBOUND_CONNECTIONS
         self.MAX_PEERS_TO_SHARE       = MAX_PEERS_TO_SHARE
 
-        # ── Intervalos ─────────────────────────────────────────
         self.GOSSIP_INTERVAL  = GOSSIP_INTERVAL
         self.PING_INTERVAL    = PING_INTERVAL
         self.CLEANUP_INTERVAL = CLEANUP_INTERVAL
 
-        # ── Seed client ────────────────────────────────────────
         self.seed_client = SeedClient(
             node_id=self.id,
             host=self.host,
@@ -110,10 +93,7 @@ class P2PNode:
             seed_port=SEED_PORT,
         )
 
-        # ── Event loop (capturado en start()) ──────────────────
         self.loop: Optional[asyncio.AbstractEventLoop] = None
-
-        # ── Logger ─────────────────────────────────────────────
         self.logger = setup_logger(self.id)
 
     # ──────────────────────────────────────────────────────────
@@ -121,17 +101,11 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def start(self):
-        """
-        Inicia el nodo:
-        1. Captura event loop (para Flask bridge)
-        2. Registra en seed y obtiene peers iniciales
-        3. Arranca servidor WebSocket
-        4. Lanza tareas periódicas
-        """
         self.loop = asyncio.get_running_loop()
 
         self.logger.info(f"[INIT] Iniciando {self.id} en {self.host}:{self.port}")
         self.logger.info(f"[WALLET] Address: {self.wallet.address}")
+        self.logger.info(f"[CHAIN] Altura inicial: {self.blockchain.get_height()}")
 
         await self._bootstrap_from_seed()
 
@@ -151,13 +125,7 @@ class P2PNode:
         await asyncio.Future()
 
     async def _bootstrap_from_seed(self):
-        """
-        Registra en el seed y agrega los peers que devuelve.
-        Usa run_in_executor porque requests es síncrono.
-        Falla silenciosamente si el seed no está disponible.
-        """
         loop = asyncio.get_running_loop()
-
         registered = await loop.run_in_executor(None, self.seed_client.register)
 
         if not registered:
@@ -182,7 +150,6 @@ class P2PNode:
         )
 
     async def seed_register_loop(self):
-        """Re-registra en el seed periódicamente como keep-alive."""
         await asyncio.sleep(30)
         while True:
             try:
@@ -197,7 +164,6 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def handle_incoming_connection(self, websocket, path):
-        """Maneja conexión WebSocket entrante de otro nodo."""
         peer_address = None
         try:
             remote = websocket.remote_address
@@ -215,7 +181,7 @@ class P2PNode:
                     self.logger.warning("[FAIL] Mensaje inválido")
                     continue
 
-                if msg['type'] == 'version':
+                if msg['type'] == MSG_VERSION:
                     node_id   = msg['payload']['node_id']
                     peer_host = msg['payload'].get('host', remote[0])
                     peer_port = msg['payload'].get('port', 0)
@@ -229,7 +195,7 @@ class P2PNode:
                     self.peers_known[peer_address].mark_connected()
                     self.logger.info(f"[CONNECTED] {peer_address} ({node_id})")
 
-                    verack = create_message('verack', {'node_id': self.id})
+                    verack = create_message(MSG_VERACK, {'node_id': self.id})
                     await websocket.send(json.dumps(verack))
                 else:
                     await self.handle_message(msg, websocket)
@@ -250,7 +216,6 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def connect_to_bootstrap(self):
-        """Conecta a peers conocidos respetando el límite outbound."""
         await asyncio.sleep(2)
         self.logger.info("[SEARCH] Conectando a peers conocidos...")
 
@@ -266,7 +231,6 @@ class P2PNode:
             await self.connect_to_peer(peer_info)
 
     async def connect_to_peer(self, peer_info: PeerInfo):
-        """Intenta conexión WebSocket con un peer específico."""
         uri = f"ws://{peer_info.host}:{peer_info.port}"
         try:
             self.logger.info(f"[CONNECT] {uri}...")
@@ -276,7 +240,7 @@ class P2PNode:
                 websockets.connect(uri), timeout=CONNECT_TIMEOUT
             )
 
-            version_msg = create_message('version', {
+            version_msg = create_message(MSG_VERSION, {
                 'node_id': self.id,
                 'version': '1.0',
                 'host':    self.host,
@@ -289,7 +253,7 @@ class P2PNode:
             )
             verack = json.loads(response)
 
-            if verack['type'] == 'verack':
+            if verack['type'] == MSG_VERACK:
                 addr = peer_info.get_address()
                 self.peers_connected[addr] = websocket
                 peer_info.mark_connected()
@@ -297,6 +261,10 @@ class P2PNode:
 
                 asyncio.create_task(self.listen_to_peer(websocket, addr))
                 await self.request_peers(websocket)
+
+                # ── Sincronización de cadena al conectar ──────
+                # Solicitar cadena del peer para aplicar longest chain rule
+                await self._request_chain_sync(websocket)
 
         except asyncio.TimeoutError:
             self.logger.warning(f"[TIMEOUT] {uri}")
@@ -306,7 +274,6 @@ class P2PNode:
             peer_info.mark_failure()
 
     async def listen_to_peer(self, websocket, peer_address: str):
-        """Escucha mensajes de un peer con el que iniciamos la conexión."""
         try:
             async for raw_message in websocket:
                 msg = json.loads(raw_message)
@@ -326,7 +293,7 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def handle_message(self, msg: dict, sender_ws):
-        """Despacha mensajes. Anti-loop: ignora IDs ya procesados."""
+        """Despacha mensajes. Anti-loop por msg_id."""
         msg_id   = msg['id']
         msg_type = msg['type']
 
@@ -339,20 +306,23 @@ class P2PNode:
 
         self.logger.debug(f"[MSG] {msg_type} (id={msg_id[:8]}...)")
 
-        if   msg_type == 'ping':    await self._handle_ping(msg, sender_ws)
-        elif msg_type == 'pong':    pass
-        elif msg_type == 'getaddr': await self.handle_getaddr(sender_ws)
-        elif msg_type == 'addr':    await self.handle_addr(msg['payload'])
-        elif msg_type == 'tx':      await self.handle_tx(msg, sender_ws)
+        if   msg_type == MSG_PING:      await self._handle_ping(msg, sender_ws)
+        elif msg_type == MSG_PONG:      pass
+        elif msg_type == MSG_GETADDR:   await self.handle_getaddr(sender_ws)
+        elif msg_type == MSG_ADDR:      await self.handle_addr(msg['payload'])
+        elif msg_type == MSG_TX:        await self.handle_tx(msg, sender_ws)
+        elif msg_type == MSG_BLOCK:     await self.handle_block(msg, sender_ws)
+        elif msg_type == MSG_INV:       await self.handle_inv(msg, sender_ws)
+        elif msg_type == MSG_GETBLOCKS: await self.handle_getblocks(sender_ws)
         else:
             self.logger.debug(f"[MSG] Tipo desconocido: {msg_type}")
 
     # ──────────────────────────────────────────────────────────
-    # Handlers individuales
+    # Handlers — red y gossip
     # ──────────────────────────────────────────────────────────
 
     async def _handle_ping(self, msg: dict, sender_ws):
-        pong = create_message('pong', {'nonce': msg['payload']['nonce']})
+        pong = create_message(MSG_PONG, {'nonce': msg['payload']['nonce']})
         await sender_ws.send(json.dumps(pong))
 
     async def handle_getaddr(self, sender_ws):
@@ -364,12 +334,11 @@ class P2PNode:
         valid.sort(key=lambda p: p.last_seen, reverse=True)
         share = valid[:self.MAX_PEERS_TO_SHARE]
 
-        msg = create_message('addr', {
+        msg = create_message(MSG_ADDR, {
             'peers': [p.to_dict() for p in share],
             'count': len(share),
         })
         await sender_ws.send(json.dumps(msg))
-        self.logger.debug(f"[ADDR] Enviados {len(share)} peers")
 
     async def handle_addr(self, payload: dict):
         peers_data = payload.get('peers', [])
@@ -396,16 +365,201 @@ class P2PNode:
             await self.connect_to_bootstrap()
 
     # ──────────────────────────────────────────────────────────
-    # Transacciones
+    # Handlers — bloques (Sprint 4)
+    # ──────────────────────────────────────────────────────────
+
+    async def handle_block(self, msg: dict, sender_ws):
+        """
+        Procesa un bloque recibido de la red.
+
+        Flujo:
+        1. Deserializar bloque
+        2. Intentar agregar directamente (conecta con nuestro tip)
+        3. Si no conecta → solicitar cadena completa al peer
+           para aplicar longest chain rule
+        4. Si se aceptó → propagarlo al resto de la red
+        """
+        try:
+            block_data = msg['payload']
+            block      = Block.from_dict(block_data)
+            block_hash = block.hash
+
+            self.logger.info(
+                f"[BLOCK] Recibido: {block_hash[:16]}... "
+                f"(prev={block.header.prev_hash[:16]}..., "
+                f"txs={len(block.transactions)})"
+            )
+
+            # Intentar agregar directamente
+            if self.blockchain.add_block(block):
+                self.logger.info(
+                    f"[BLOCK] Aceptado en altura {self.blockchain.get_height()}"
+                )
+                # Propagar al resto de la red (excepto quien lo envió)
+                await self.broadcast_block(block, exclude_ws=sender_ws)
+
+            else:
+                # No conectó con nuestro tip — puede ser fork
+                # Solicitar cadena completa para aplicar longest chain rule
+                self.logger.info(
+                    f"[BLOCK] No conecta con nuestro tip "
+                    f"(altura={self.blockchain.get_height()}) — "
+                    f"solicitando cadena completa"
+                )
+                await self._request_chain_sync(sender_ws)
+
+        except Exception as e:
+            self.logger.error(f"[BLOCK] Error procesando bloque: {e}")
+
+    async def handle_inv(self, msg: dict, sender_ws):
+        """
+        Procesa anuncio INV: el peer nos avisa que tiene un bloque nuevo.
+
+        INV es más eficiente que enviar el bloque completo directamente:
+        el peer anuncia el hash, nosotros pedimos el bloque completo
+        solo si no lo tenemos.
+
+        En Bitcoin real: inv → getdata → block
+        En nuestro demo: inv → getblocks (pedimos cadena completa si el
+        hash no está en nuestra cadena)
+        """
+        try:
+            inv_hash   = msg['payload'].get('hash')
+            inv_height = msg['payload'].get('height', 0)
+
+            if not inv_hash:
+                return
+
+            # Si ya tenemos ese bloque, ignorar
+            if self.blockchain.get_block_by_hash(inv_hash):
+                self.logger.debug(f"[INV] Bloque ya conocido: {inv_hash[:16]}...")
+                return
+
+            # Si el peer tiene más bloques que nosotros, sincronizar
+            if inv_height > self.blockchain.get_height():
+                self.logger.info(
+                    f"[INV] Peer tiene bloque {inv_hash[:16]}... "
+                    f"(altura {inv_height} > nuestra {self.blockchain.get_height()}) "
+                    f"— sincronizando"
+                )
+                await self._request_chain_sync(sender_ws)
+
+        except Exception as e:
+            self.logger.error(f"[INV] Error: {e}")
+
+    async def handle_getblocks(self, sender_ws):
+        """
+        Responde a getblocks enviando nuestra cadena completa.
+
+        En Bitcoin real: getblocks → inv (lista de hashes) → getdata → blocks
+        En nuestro demo: getblocks → block (cadena completa serializada)
+        Simplificación válida para redes pequeñas (<100 bloques).
+        """
+        try:
+            chain_data = self.blockchain.get_chain_as_dicts()
+
+            msg = create_message(MSG_BLOCK, {
+                'chain':  chain_data,
+                'height': self.blockchain.get_height(),
+                'type':   'full_chain',
+            })
+            await sender_ws.send(json.dumps(msg))
+
+            self.logger.info(
+                f"[GETBLOCKS] Cadena enviada: {self.blockchain.get_height()} bloques"
+            )
+
+        except Exception as e:
+            self.logger.error(f"[GETBLOCKS] Error enviando cadena: {e}")
+
+    async def _request_chain_sync(self, websocket):
+        """
+        Solicita la cadena completa a un peer para sincronizar.
+        Si la cadena recibida es más larga y válida, reemplaza la nuestra.
+        """
+        try:
+            getblocks_msg = create_message(MSG_GETBLOCKS, {
+                'height': self.blockchain.get_height(),
+            })
+            await websocket.send(json.dumps(getblocks_msg))
+            self.logger.debug(
+                f"[SYNC] getblocks enviado "
+                f"(nuestra altura: {self.blockchain.get_height()})"
+            )
+        except Exception as e:
+            self.logger.error(f"[SYNC] Error solicitando cadena: {e}")
+
+    def _process_full_chain(self, chain_data: list) -> bool:
+        """
+        Procesa una cadena completa recibida vía getblocks.
+        Aplica longest chain rule.
+
+        Args:
+            chain_data: Lista de dicts de bloques.
+
+        Returns:
+            True si la cadena fue aceptada y reemplazó la nuestra.
+        """
+        try:
+            new_chain = Blockchain.chain_from_dicts(chain_data)
+            replaced  = self.blockchain.replace_chain(new_chain)
+
+            if replaced:
+                self.logger.info(
+                    f"[SYNC] Cadena reemplazada. "
+                    f"Nueva altura: {self.blockchain.get_height()}"
+                )
+            else:
+                self.logger.debug(
+                    f"[SYNC] Nuestra cadena sigue siendo la más larga "
+                    f"({self.blockchain.get_height()} bloques)"
+                )
+
+            return replaced
+
+        except Exception as e:
+            self.logger.error(f"[SYNC] Error procesando cadena: {e}")
+            return False
+
+    # ──────────────────────────────────────────────────────────
+    # Broadcast de bloques
+    # ──────────────────────────────────────────────────────────
+
+    async def broadcast_block(self, block: Block, exclude_ws=None):
+        """
+        Propaga un bloque minado a todos los peers conectados.
+
+        Flujo Bitcoin real: minar → inv (anunciar hash) → peers piden con getdata
+        Nuestro demo: minar → block (enviar completo directamente)
+        Simplificación válida para bloques pequeños en red LAN.
+
+        Args:
+            block:      Bloque a propagar.
+            exclude_ws: WebSocket a excluir (quien nos lo envió).
+        """
+        # Anunciar primero con INV (hash + altura)
+        inv_msg = create_message(MSG_INV, {
+            'hash':   block.hash,
+            'height': self.blockchain.get_height(),
+        })
+        await self.broadcast_message(inv_msg, exclude_ws=exclude_ws)
+
+        # Enviar bloque completo
+        block_msg = create_message(MSG_BLOCK, block.to_dict())
+        await self.broadcast_message(block_msg, exclude_ws=exclude_ws)
+
+        self.logger.info(
+            f"[BROADCAST] Bloque {block.hash[:16]}... "
+            f"propagado a {len(self.peers_connected)} peers"
+        )
+
+    # ──────────────────────────────────────────────────────────
+    # Handlers — transacciones
     # ──────────────────────────────────────────────────────────
 
     async def handle_tx(self, msg: dict, sender_ws):
-        """
-        TX recibida de la red.
-        Delega validación y almacenamiento a Blockchain (un solo mempool).
-        """
         try:
-            tx = Transaction.from_dict(msg['payload'])
+            tx       = Transaction.from_dict(msg['payload'])
             accepted = self.blockchain.add_transaction_to_mempool(tx)
 
             if accepted:
@@ -420,17 +574,10 @@ class P2PNode:
             self.logger.error(f"[TX] Error: {e}")
 
     async def broadcast_transaction(self, tx: Transaction, exclude_ws=None):
-        """Propaga una TX firmada a todos los peers."""
-        msg = create_message('tx', tx.to_dict())
+        msg = create_message(MSG_TX, tx.to_dict())
         await self.broadcast_message(msg, exclude_ws=exclude_ws)
 
     def create_transaction(self, to_address: str, amount: float) -> Transaction:
-        """
-        Crea, firma y agrega al mempool una TX desde este nodo.
-
-        Raises:
-            ValueError: Balance insuficiente.
-        """
         if not self.blockchain.has_sufficient_balance(self.wallet.address, amount):
             raise ValueError(
                 f"Balance insuficiente: "
@@ -452,7 +599,6 @@ class P2PNode:
         return tx
 
     def get_balance(self) -> float:
-        """Balance real desde la blockchain (no del mempool)."""
         return self.blockchain.get_balance(self.wallet.address)
 
     # ──────────────────────────────────────────────────────────
@@ -460,7 +606,6 @@ class P2PNode:
     # ──────────────────────────────────────────────────────────
 
     async def broadcast_message(self, msg: dict, exclude_ws=None):
-        """Envía un mensaje a todos los peers conectados."""
         count = 0
         for addr, ws in list(self.peers_connected.items()):
             if ws == exclude_ws:
@@ -473,8 +618,7 @@ class P2PNode:
         self.logger.debug(f"[BROADCAST] Enviado a {count} peers")
 
     async def request_peers(self, websocket):
-        """Solicita lista de peers a un peer conectado."""
-        getaddr = create_message('getaddr', {})
+        getaddr = create_message(MSG_GETADDR, {})
         await websocket.send(json.dumps(getaddr))
 
     # ──────────────────────────────────────────────────────────
@@ -504,7 +648,7 @@ class P2PNode:
             try:
                 for addr, ws in list(self.peers_connected.items()):
                     try:
-                        ping = create_message('ping', {
+                        ping = create_message(MSG_PING, {
                             'nonce': int(datetime.now().timestamp())
                         })
                         await ws.send(json.dumps(ping))
@@ -540,6 +684,6 @@ class P2PNode:
         return (
             f"P2PNode(id={self.id}, "
             f"peers={len(self.peers_connected)}, "
-            f"chain={len(self.blockchain.chain)}, "
+            f"height={self.blockchain.get_height()}, "
             f"mempool={len(self.blockchain.mempool)})"
         )
