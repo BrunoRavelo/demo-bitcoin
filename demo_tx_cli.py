@@ -1,129 +1,269 @@
 """
-Demo CLI - Propagación de Transacciones P2P
-Levanta 5 nodos y muestra TXs propagándose
+Demo CLI — Stack completo funcional
+Levanta 5 nodos con blockchain real, minado automático y TXs automáticas
+
+Uso:
+    python demo_tx_cli.py
+
+Muestra en tiempo real:
+    - Conexión de nodos y gossip
+    - Bloques minados y propagados
+    - Transacciones automáticas
+    - Balances actualizados
+    - Altura de cadena por nodo
+
+Presiona Ctrl+C para ver el resumen final.
 """
 
 import asyncio
-from network.p2p_node import P2PNode
+import random
+from core.blockchain import Blockchain
+from core.transaction import Transaction
+from network.p2p_node import P2PNode, MINING_AUTO, MINING_PAUSED
+from network.seed_node import SeedNode
+import threading
 
-# Configuración de nodos
+# ──────────────────────────────────────────────────────────
+# Configuración del demo
+# ──────────────────────────────────────────────────────────
+
+NUM_NODES  = 5
+BASE_PORT  = 6000
+DIFFICULTY = 3   # Rápido para el demo (~0.5s por bloque)
+
 NODES_CONFIG = [
-    {'port': 5000, 'bootstrap': []},
-    {'port': 5001, 'bootstrap': [('localhost', 5000)]},
-    {'port': 5002, 'bootstrap': [('localhost', 5000)]},
-    {'port': 5003, 'bootstrap': [('localhost', 5001)]},
-    {'port': 5004, 'bootstrap': [('localhost', 5002)]},
+    {'port': BASE_PORT,     'bootstrap': []},
+    {'port': BASE_PORT + 1, 'bootstrap': [('localhost', BASE_PORT)]},
+    {'port': BASE_PORT + 2, 'bootstrap': [('localhost', BASE_PORT)]},
+    {'port': BASE_PORT + 3, 'bootstrap': [('localhost', BASE_PORT + 1)]},
+    {'port': BASE_PORT + 4, 'bootstrap': [('localhost', BASE_PORT + 2)]},
 ]
 
-async def start_node(config):
-    """Inicia un nodo P2P"""
+# ──────────────────────────────────────────────────────────
+# Helpers de display
+# ──────────────────────────────────────────────────────────
+
+SEP   = "─" * 70
+SEP2  = "═" * 70
+
+def header(title: str):
+    print(f"\n{SEP2}")
+    print(f"  {title}")
+    print(SEP2)
+
+def section(title: str):
+    print(f"\n{SEP}")
+    print(f"  {title}")
+    print(SEP)
+
+def status_table(nodes):
+    """Imprime tabla de estado de todos los nodos."""
+    print(f"\n  {'Nodo':<12} {'Altura':>7} {'Balance':>10} {'Peers':>6} {'Mempool':>8} {'Minados':>8}")
+    print(f"  {'-'*12} {'-'*7} {'-'*10} {'-'*6} {'-'*8} {'-'*8}")
+    for node in nodes:
+        print(
+            f"  {node.id:<12} "
+            f"{node.blockchain.get_height():>7} "
+            f"{node.get_balance():>10.2f} "
+            f"{len(node.peers_connected):>6} "
+            f"{len(node.blockchain.mempool):>8} "
+            f"{node.blocks_mined:>8}"
+        )
+
+# ──────────────────────────────────────────────────────────
+# Creación de nodos
+# ──────────────────────────────────────────────────────────
+
+def make_node(config: dict) -> P2PNode:
+    """Crea un nodo con blockchain configurada para el demo."""
+    bc = Blockchain()
+    bc.DIFFICULTY = DIFFICULTY
+
     node = P2PNode(
         host='localhost',
         port=config['port'],
-        bootstrap_peers=config['bootstrap']
+        bootstrap_peers=config['bootstrap'],
+        blockchain=bc,
     )
-    asyncio.create_task(node.start())
-    await asyncio.sleep(0.5)  # Esperar a que arranque
+    # Modo PAUSED al inicio — activamos manualmente después
+    node.mining_mode = MINING_PAUSED
     return node
 
+# ──────────────────────────────────────────────────────────
+# Demo de TXs manuales
+# ──────────────────────────────────────────────────────────
+
+async def demo_manual_txs(nodes):
+    """Demuestra TXs manuales entre nodos con balance."""
+    section("DEMO: Transacciones manuales")
+
+    # Encontrar nodos con balance
+    senders = [n for n in nodes if n.get_balance() > 0]
+    if len(senders) < 2:
+        print("  ⚠ Pocos nodos con balance — esperando más bloques...")
+        return
+
+    sender    = senders[0]
+    recipient = random.choice([n for n in nodes if n != sender])
+
+    amount = round(sender.get_balance() * 0.15, 2)
+    if amount < 0.01:
+        print("  ⚠ Balance insuficiente para TX manual")
+        return
+
+    print(f"\n  TX manual: {sender.id} → {recipient.id} ({amount} coins)")
+    print(f"  From:   {sender.wallet.address[:20]}...")
+    print(f"  To:     {recipient.wallet.address[:20]}...")
+    print(f"  Amount: {amount}")
+
+    try:
+        tx = sender.create_transaction(recipient.wallet.address, amount)
+        await sender.broadcast_transaction(tx)
+        print(f"  ✓ TX propagada: {tx.short_hash()}")
+        await asyncio.sleep(2)
+
+        # Verificar propagación
+        count = sum(
+            1 for n in nodes
+            if any(t.hash() == tx.hash() for t in n.blockchain.mempool)
+        )
+        print(f"  ✓ TX en mempool de {count}/{len(nodes)} nodos")
+
+    except ValueError as e:
+        print(f"  ✗ Error: {e}")
+
+# ──────────────────────────────────────────────────────────
+# Demo de TXs automáticas
+# ──────────────────────────────────────────────────────────
+
+async def demo_auto_txs(nodes, count: int = 5):
+    """Genera TXs automáticas entre nodos con balance."""
+    section(f"DEMO: {count} transacciones automáticas")
+
+    sent = 0
+    for i in range(count):
+        senders = [n for n in nodes if n.get_balance() > 5]
+        if not senders:
+            print(f"  ⚠ Ningún nodo con balance suficiente")
+            break
+
+        sender    = random.choice(senders)
+        recipient = random.choice([n for n in nodes if n != sender])
+        amount    = round(random.uniform(1.0, sender.get_balance() * 0.1), 2)
+        amount    = max(0.01, amount)
+
+        try:
+            tx = sender.create_transaction(recipient.wallet.address, amount)
+            await sender.broadcast_transaction(tx)
+            print(
+                f"  TX {i+1}: {sender.id} → {recipient.id} "
+                f"({amount:.2f} coins) — {tx.short_hash()}"
+            )
+            sent += 1
+        except ValueError:
+            pass
+
+        await asyncio.sleep(0.5)
+
+    print(f"\n  ✓ {sent} TXs automáticas enviadas")
+
+# ──────────────────────────────────────────────────────────
+# Main
+# ──────────────────────────────────────────────────────────
+
 async def main():
-    print("\n" + "=" * 70)
-    print("  DEMO: Integración P2P + Transacciones")
-    print("=" * 70 + "\n")
-    
-    # 1. Levantar 5 nodos
-    print("[1/4] Levantando 5 nodos...")
+    header("BLOCKCHAIN DEMO — CLI Stack Completo")
+    print(f"""
+  Nodos:      {NUM_NODES}
+  Difficulty: {DIFFICULTY} (~0.5s por bloque)
+  Puertos:    {BASE_PORT} – {BASE_PORT + NUM_NODES - 1}
+
+  Presiona Ctrl+C para ver el resumen final.
+""")
+
+    # ── 1. Levantar nodos ──────────────────────────────────
+    section("1. Levantando nodos P2P")
     nodes = []
     for i, config in enumerate(NODES_CONFIG, 1):
-        print(f"      Nodo {i} (puerto {config['port']})...")
-        node = await start_node(config)
+        node = make_node(config)
         nodes.append(node)
-    
-    print(f"      ✓ 5 nodos iniciados\n")
-    
-    # 2. Esperar gossip
-    print("[2/4] Esperando descubrimiento de peers (gossip protocol)...")
+        asyncio.create_task(node.start())
+        print(f"  [{i}/{NUM_NODES}] {node.id} en puerto {config['port']}")
+        await asyncio.sleep(0.3)
+
+    print(f"\n  Esperando conexiones...")
+    await asyncio.sleep(3)
+
+    section("Estado inicial de la red")
+    status_table(nodes)
+
+    # ── 2. Minar bloques iniciales ─────────────────────────
+    section("2. Minando bloques iniciales (para generar balance)")
+    print("  Activando minado en todos los nodos...")
+
+    for node in nodes:
+        node.set_mining_mode(MINING_AUTO)
+
+    print("  Esperando que se minen algunos bloques...")
     await asyncio.sleep(8)
-    
-    # Verificar conectividad
-    for i, node in enumerate(nodes, 1):
-        print(f"      Nodo {i}: {len(node.peers_connected)} peers conectados")
-    print()
-    
-    # 3. Mostrar wallets
-    print("[3/4] Wallets de cada nodo:")
-    print("-" * 70)
-    for i, node in enumerate(nodes, 1):
-        print(f"  Nodo {i}: {node.wallet.address}")
-        print(f"           Balance inicial: {node.get_balance()}")
-    print()
-    
-    # 4. Crear y propagar transacciones
-    print("[4/4] Creando y propagando transacciones...")
-    print("-" * 70)
-    
-    # TX 1: Nodo 1 → Nodo 2 (10 coins)
-    print("\n► TX1: Nodo 1 envía 10 coins a Nodo 2")
-    tx1 = nodes[0].create_transaction(nodes[1].wallet.address, 10)
-    await nodes[0].broadcast_transaction(tx1)
+
+    section("Estado después del minado inicial")
+    status_table(nodes)
+
+    # ── 3. TXs manuales ───────────────────────────────────
+    await demo_manual_txs(nodes)
+
     await asyncio.sleep(2)
-    
-    print(f"  Propagación:")
-    for i, node in enumerate(nodes, 1):
-        count = len(node.mempool)
-        print(f"    Nodo {i}: {count} TX en mempool")
-    
-    # TX 2: Nodo 2 → Nodo 3 (5 coins)
-    print("\n► TX2: Nodo 2 envía 5 coins a Nodo 3")
-    tx2 = nodes[1].create_transaction(nodes[2].wallet.address, 5)
-    await nodes[1].broadcast_transaction(tx2)
-    await asyncio.sleep(2)
-    
-    print(f"  Propagación:")
-    for i, node in enumerate(nodes, 1):
-        count = len(node.mempool)
-        print(f"    Nodo {i}: {count} TXs en mempool")
-    
-    # TX 3: Nodo 3 → Nodo 4 (2 coins)
-    print("\n► TX3: Nodo 3 envía 2 coins a Nodo 4")
-    tx3 = nodes[2].create_transaction(nodes[3].wallet.address, 2)
-    await nodes[2].broadcast_transaction(tx3)
-    await asyncio.sleep(2)
-    
-    print(f"  Propagación:")
-    for i, node in enumerate(nodes, 1):
-        count = len(node.mempool)
-        print(f"    Nodo {i}: {count} TXs en mempool")
-    
-    # 5. Balances finales
-    print("\n" + "=" * 70)
-    print("  RESULTADO FINAL")
-    print("=" * 70)
-    print("\nBalances:")
-    for i, node in enumerate(nodes, 1):
-        balance = node.get_balance()
-        print(f"  Nodo {i}: {balance:.2f} coins (cambio: {balance - 100:+.2f})")
-    
-    print(f"\nMempool (sincronizado en todos los nodos):")
-    print(f"  {len(nodes[0].mempool)} transacciones confirmadas\n")
-    
-    for i, tx in enumerate(nodes[0].mempool, 1):
-        print(f"  TX{i}: {tx.hash()[:16]}...")
-        print(f"       {tx.from_address[:12]}... → {tx.to_address[:12]}...")
-        print(f"       Monto: {tx.amount} coins\n")
-    
-    print("=" * 70)
-    print("✓ Demo completado. Presiona Ctrl+C para salir")
-    print("=" * 70 + "\n")
-    
-    # Mantener corriendo
+    section("Estado después de TXs manuales")
+    status_table(nodes)
+
+    # ── 4. TXs automáticas ────────────────────────────────
+    await demo_auto_txs(nodes, count=5)
+
+    print("\n  Esperando que las TXs se confirmen en bloques...")
+    await asyncio.sleep(6)
+
+    # ── 5. Resumen final ──────────────────────────────────
+    section("5. Resumen final")
+    status_table(nodes)
+
+    total_blocks = sum(n.blocks_mined for n in nodes)
+    total_txs    = sum(
+        len([tx for block in n.blockchain.chain for tx in block.transactions
+             if not tx.is_coinbase()])
+        for n in nodes
+    ) // len(nodes)  # Promedio (cada nodo tiene la misma cadena)
+
+    print(f"""
+  Bloques minados (total red): {total_blocks}
+  Altura de cadena:            {nodes[0].blockchain.get_height()}
+  TXs confirmadas (aprox):     {total_txs}
+
+  ✓ Demo completado correctamente
+""")
+
+    header("Red activa — Presiona Ctrl+C para detener")
+
     try:
         await asyncio.Future()
-    except KeyboardInterrupt:
-        print("\nCerrando nodos...")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
 
-if __name__ == "__main__":
+    # ── Resumen al salir ──────────────────────────────────
+    print(f"\n\n{SEP}")
+    print("  RESUMEN FINAL")
+    print(SEP)
+    status_table(nodes)
+
+    print(f"\n  Wallets:")
+    for node in nodes:
+        print(f"    {node.id}: {node.wallet.address}")
+
+    print(f"\n  Demo terminado.\n")
+
+
+if __name__ == '__main__':
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("\nDemo terminado.")
+        print("\n  Demo interrumpido.\n")
