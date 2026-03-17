@@ -6,7 +6,7 @@
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
     min-height: 100vh;
     padding: 20px;
 }
@@ -16,109 +16,163 @@ body {
     margin: 0 auto;
 }
 
-/* Header */
+/* ── Header ─────────────────────────────────────────────── */
+
 .header {
     background: white;
-    padding: 30px;
-    border-radius: 10px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    padding: 25px 30px;
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
     margin-bottom: 20px;
     text-align: center;
 }
 
 .header h1 {
-    color: #667eea;
-    margin-bottom: 15px;
-    font-size: 2em;
+    color: #1a1a2e;
+    margin-bottom: 12px;
+    font-size: 1.8em;
+    letter-spacing: 1px;
 }
 
 .ports {
     display: flex;
     justify-content: center;
-    gap: 15px;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
 .port-badge {
-    background: #f0f0f0;
-    padding: 8px 16px;
+    background: #f0f4ff;
+    padding: 6px 14px;
     border-radius: 20px;
-    font-size: 0.9em;
-    color: #666;
+    font-size: 0.85em;
+    color: #1a1a2e;
     font-weight: 600;
+    border: 1px solid #dde3ff;
 }
 
-/* Cards */
+/* ── Notificación ────────────────────────────────────────── */
+
+.notification {
+    background: #e8f5e9;
+    border: 1px solid #4CAF50;
+    border-left: 4px solid #4CAF50;
+    color: #2e7d32;
+    padding: 12px 20px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-weight: 600;
+    transition: opacity 0.3s;
+}
+
+.notification.hidden {
+    display: none;
+}
+
+/* ── Cards ───────────────────────────────────────────────── */
+
 .card {
     background: white;
     padding: 25px;
-    border-radius: 10px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.1);
     margin-bottom: 20px;
 }
 
 .card h2 {
-    color: #333;
+    color: #1a1a2e;
     margin-bottom: 20px;
-    border-bottom: 2px solid #667eea;
+    border-bottom: 3px solid #667eea;
     padding-bottom: 10px;
-    font-size: 1.4em;
+    font-size: 1.3em;
 }
 
-/* Info Grid */
+.card h3 {
+    color: #555;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+/* ── Info Grid ───────────────────────────────────────────── */
+
 .info-grid {
     display: grid;
-    gap: 15px;
+    gap: 12px;
 }
 
 .info-item {
     display: flex;
     justify-content: space-between;
-    padding: 12px 0;
-    border-bottom: 1px solid #eee;
+    align-items: center;
+    padding: 10px 0;
+    border-bottom: 1px solid #f0f0f0;
+    flex-wrap: wrap;
+    gap: 8px;
 }
 
 .label {
     font-weight: 600;
     color: #666;
+    font-size: 0.9em;
 }
 
 .value {
-    color: #333;
+    color: #1a1a2e;
     font-weight: 500;
 }
 
+.unit {
+    color: #888;
+    font-size: 0.9em;
+    margin-left: 4px;
+}
+
 .balance {
-    font-size: 1.5em;
+    font-size: 1.6em;
     font-weight: bold;
-    color: #4CAF50;
+    color: #2e7d32;
 }
 
 .monospace {
     font-family: 'Courier New', monospace;
-    font-size: 0.85em;
+    font-size: 0.82em;
     word-break: break-all;
 }
 
-/* Forms */
+.small {
+    font-size: 0.78em;
+}
+
+.hint {
+    color: #999;
+    font-size: 0.82em;
+    margin-top: 4px;
+    display: block;
+}
+
+/* ── Formulario TX ───────────────────────────────────────── */
+
 .form-group {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
 }
 
 .form-group label {
     display: block;
-    margin-bottom: 8px;
+    margin-bottom: 6px;
     font-weight: 600;
     color: #333;
+    font-size: 0.95em;
 }
 
 .form-group input,
 .form-group select {
     width: 100%;
-    padding: 12px;
+    padding: 11px 14px;
     border: 2px solid #ddd;
-    border-radius: 5px;
-    font-size: 16px;
+    border-radius: 8px;
+    font-size: 15px;
     transition: border-color 0.3s;
+    background: white;
 }
 
 .form-group input:focus,
@@ -127,119 +181,228 @@ body {
     border-color: #667eea;
 }
 
+/* ── Botones ─────────────────────────────────────────────── */
+
 .btn-primary {
-    background: #667eea;
+    background: linear-gradient(135deg, #667eea, #764ba2);
     color: white;
     border: none;
-    padding: 14px 30px;
-    border-radius: 5px;
-    font-size: 16px;
+    padding: 13px 28px;
+    border-radius: 8px;
+    font-size: 15px;
     font-weight: 600;
     cursor: pointer;
-    transition: background 0.3s;
+    transition: opacity 0.2s, transform 0.1s;
     width: 100%;
 }
 
-.btn-primary:hover {
-    background: #5568d3;
-}
+.btn-primary:hover    { opacity: 0.9; }
+.btn-primary:active   { transform: scale(0.98); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.btn-primary:active {
-    transform: scale(0.98);
-}
-
-/* Peer List */
-.peer-list {
-    list-style: none;
-    padding: 0;
-    margin-top: 15px;
-}
-
-.peer-list li {
-    padding: 10px;
-    background: #f9f9f9;
-    margin-bottom: 8px;
-    border-radius: 5px;
-    border-left: 4px solid #4CAF50;
-}
-
-/* TX List */
-.tx-list {
-    max-height: 400px;
-    overflow-y: auto;
-    margin-top: 15px;
-}
-
-.tx-item {
-    padding: 15px;
-    background: #f9f9f9;
-    border-left: 4px solid #667eea;
-    margin-bottom: 12px;
-    border-radius: 5px;
-}
-
-.tx-hash {
-    font-family: 'Courier New', monospace;
-    color: #666;
-    font-size: 0.85em;
-    margin-bottom: 8px;
-}
-
-.tx-details {
-    color: #333;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-}
-
-.tx-amount {
-    font-weight: bold;
-    color: #4CAF50;
-    font-size: 1.1em;
-}
-
-.empty {
-    text-align: center;
-    color: #999;
-    padding: 30px;
-    font-style: italic;
-}
-
-/* Scrollbar */
-.tx-list::-webkit-scrollbar {
-    width: 8px;
-}
-
-.tx-list::-webkit-scrollbar-track {
-    background: #f1f1f1;
-    border-radius: 4px;
-}
-
-.tx-list::-webkit-scrollbar-thumb {
-    background: #667eea;
-    border-radius: 4px;
-}
-
-.tx-list::-webkit-scrollbar-thumb:hover {
-    background: #5568d3;
-}
-
-/* Botón copiar */
 .btn-copy {
     background: #4CAF50;
     color: white;
     border: none;
     padding: 6px 12px;
-    border-radius: 4px;
-    font-size: 0.85em;
+    border-radius: 6px;
+    font-size: 0.82em;
     cursor: pointer;
-    transition: background 0.3s;
+    white-space: nowrap;
 }
 
-.btn-copy:hover {
-    background: #45a049;
+.btn-copy:hover { background: #388e3c; }
+
+/* ── Controles de minado ─────────────────────────────────── */
+
+.mining-controls {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
 }
 
-.btn-copy:active {
-    transform: scale(0.95);
+.btn-mode {
+    flex: 1;
+    padding: 11px;
+    border: 2px solid #ddd;
+    border-radius: 8px;
+    background: white;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #555;
+    min-width: 90px;
 }
+
+.btn-mode:hover { border-color: #667eea; color: #667eea; }
+
+.btn-mode.active[id="btn-auto"]   { background: #e8f5e9; border-color: #4CAF50; color: #2e7d32; }
+.btn-mode.active[id="btn-manual"] { background: #e3f2fd; border-color: #2196F3; color: #1565c0; }
+
+/* ── Indicador de minando ────────────────────────────────── */
+
+.mining-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 15px;
+    color: #2e7d32;
+    font-weight: 600;
+    font-size: 0.95em;
+}
+
+.mining-indicator.hidden { display: none; }
+
+.dot-pulse {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #4CAF50;
+    animation: pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50%       { opacity: 0.4; transform: scale(0.8); }
+}
+
+/* ── Lista de bloques ────────────────────────────────────── */
+
+.blocks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.block-item {
+    background: #f8f9ff;
+    border: 1px solid #e0e4ff;
+    border-left: 4px solid #667eea;
+    border-radius: 8px;
+    padding: 12px 15px;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+
+.block-item:hover { background: #eef0ff; }
+
+.block-header-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 6px;
+    flex-wrap: wrap;
+}
+
+.block-height {
+    font-weight: 700;
+    color: #667eea;
+    font-size: 1em;
+    min-width: 35px;
+}
+
+.block-hash {
+    font-family: 'Courier New', monospace;
+    font-size: 0.82em;
+    color: #555;
+    flex: 1;
+}
+
+.block-txs {
+    background: #667eea;
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.78em;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.block-meta {
+    display: flex;
+    gap: 16px;
+    font-size: 0.8em;
+    color: #888;
+    flex-wrap: wrap;
+}
+
+/* ── Peers ───────────────────────────────────────────────── */
+
+.peer-list {
+    list-style: none;
+    padding: 0;
+    margin-top: 10px;
+}
+
+.peer-list li {
+    padding: 9px 12px;
+    background: #f8fff8;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    border-left: 4px solid #4CAF50;
+    font-size: 0.9em;
+    color: #333;
+}
+
+.peer-dot {
+    color: #4CAF50;
+    margin-right: 6px;
+}
+
+/* ── Mempool ─────────────────────────────────────────────── */
+
+.tx-list {
+    max-height: 350px;
+    overflow-y: auto;
+    margin-top: 10px;
+}
+
+.tx-item {
+    padding: 12px 15px;
+    background: #f9f9f9;
+    border-left: 4px solid #667eea;
+    margin-bottom: 10px;
+    border-radius: 8px;
+}
+
+.tx-hash {
+    font-family: 'Courier New', monospace;
+    color: #888;
+    font-size: 0.8em;
+    margin-bottom: 6px;
+}
+
+.tx-details {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.tx-addr {
+    color: #444;
+    font-size: 0.88em;
+}
+
+.tx-amount {
+    font-weight: bold;
+    color: #2e7d32;
+    font-size: 1em;
+}
+
+.empty {
+    text-align: center;
+    color: #aaa;
+    padding: 25px;
+    font-style: italic;
+    font-size: 0.9em;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────── */
+
+.tx-list::-webkit-scrollbar        { width: 6px; }
+.tx-list::-webkit-scrollbar-track  { background: #f1f1f1; border-radius: 3px; }
+.tx-list::-webkit-scrollbar-thumb  { background: #667eea; border-radius: 3px; }

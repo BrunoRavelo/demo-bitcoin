@@ -8,77 +8,192 @@
 </head>
 <body>
     <div class="container">
+
         <!-- Header -->
         <div class="header">
             <h1>{{ node_id }}</h1>
             <div class="ports">
                 <span class="port-badge">P2P: {{ p2p_port }}</span>
                 <span class="port-badge">Dashboard: {{ dashboard_port }}</span>
+                <span class="port-badge" id="chain-badge">Altura: -</span>
+                <span class="port-badge mode-badge">
+                    {% if dashboard_mode == 'auto' %}⚙ Modo Auto{% else %}🖐 Modo Manual{% endif %}
+                </span>
             </div>
         </div>
 
-        <!-- Wallet Card -->
+        <!-- Notificación de bloque externo -->
+        <div id="block-notification" class="notification hidden"></div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 1: WALLET (siempre visible)                -->
+        <!-- ═══════════════════════════════════════════════════ -->
         <div class="card">
             <h2>Wallet</h2>
             <div class="info-grid">
                 <div class="info-item">
                     <span class="label">Address:</span>
-                    <div style="display: flex; gap: 10px; align-items: center;">
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                         <span class="value monospace" id="wallet-address">-</span>
                         <button type="button" class="btn-copy" onclick="copyAddress()">Copiar</button>
                     </div>
                 </div>
                 <div class="info-item">
-                    <span class="label">Balance:</span>
-                    <span class="value balance" id="wallet-balance">-</span> coins
+                    <span class="label">Balance confirmado:</span>
+                    <span class="value balance" id="wallet-balance">-</span>
+                    <span class="unit">coins</span>
                 </div>
             </div>
         </div>
 
-        <!-- Send TX Card -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 1B: ENVIAR TX (siempre visible)            -->
+        <!-- ═══════════════════════════════════════════════════ -->
         <div class="card">
-            <h2>Enviar Transaccion</h2>
+            <h2>Enviar Transacción</h2>
             <form method="POST" action="/send_tx" id="tx-form">
                 <div class="form-group">
-                    <label for="to_address">Destinatario (address):</label>
-                    <input type="text" 
-                        name="to_address" 
-                        id="to_address" 
-                        placeholder="1A2B3C4D5E6F..." 
-                        required
-                        pattern="^1[A-Za-z0-9]{25,34}$"
-                        title="Ingresa una address válida de Bitcoin (empieza con 1)">
+                    <label for="to_address">Destinatario:</label>
+                    <div style="display:flex; gap:8px;">
+                        <input type="text"
+                            name="to_address"
+                            id="to_address"
+                            placeholder="1A2B3C4D5E6F..."
+                            required>
+                        {% if dashboard_mode == 'auto' %}
+                        <select id="address-select" onchange="fillAddress(this.value)" style="min-width:140px;">
+                            <option value="">— conocidos —</option>
+                        </select>
+                        {% endif %}
+                    </div>
+                    <small class="hint">Copia la address del nodo destinatario y pégala aquí</small>
                 </div>
                 <div class="form-group">
-                    <label for="amount">Cantidad:</label>
-                    <input type="number" name="amount" id="amount" 
+                    <label for="amount">Cantidad (coins):</label>
+                    <input type="number" name="amount" id="amount"
                            min="0.01" step="0.01" value="10" required>
                 </div>
-                <button type="submit" class="btn-primary">Enviar Transaccion</button>
+                <button type="submit" class="btn-primary">Enviar Transacción</button>
             </form>
         </div>
 
-        <!-- Network Card -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 2: MINERO (siempre visible)                -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="card">
+            <h2>Minero</h2>
+
+            <div class="info-grid" style="margin-bottom:20px;">
+                <div class="info-item">
+                    <span class="label">Bloques minados:</span>
+                    <span class="value" id="blocks-mined">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Recompensas acumuladas:</span>
+                    <span class="value" id="mining-rewards">-</span>
+                    <span class="unit">coins</span>
+                </div>
+            </div>
+
+            {% if dashboard_mode == 'auto' %}
+            <!-- Controles AUTO/MANUAL solo en modo auto -->
+            <div class="info-item" style="margin-bottom:15px;">
+                <span class="label">Modo actual:</span>
+                <span class="value" id="mining-mode-label">-</span>
+            </div>
+            <div class="mining-controls" style="margin-bottom:15px;">
+                <button onclick="setMiningMode('auto')"   class="btn-mode" id="btn-auto">AUTO</button>
+                <button onclick="setMiningMode('manual')" class="btn-mode" id="btn-manual">MANUAL</button>
+            </div>
+            {% endif %}
+
+            <!-- Botón minar ahora: siempre visible -->
+            <div id="mine-once-section">
+                <button onclick="mineOnce()" class="btn-primary" id="btn-mine-once">
+                    ⛏ Minar un bloque ahora
+                </button>
+                {% if dashboard_mode == 'manual' %}
+                <p class="hint" style="margin-top:8px;">
+                    Mina un bloque para confirmar TXs del mempool y recibir 50 coins.
+                </p>
+                {% else %}
+                <div id="mining-indicator" class="mining-indicator hidden">
+                    <span class="dot-pulse"></span>
+                    Minando bloque #<span id="mining-height">-</span>...
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 3: TRANSACCIONES AUTOMÁTICAS               -->
+        <!-- Solo visible en modo 'auto'                         -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        {% if dashboard_mode == 'auto' %}
+        <div class="card">
+            <h2>Transacciones automáticas</h2>
+            <div class="info-grid" style="margin-bottom:20px;">
+                <div class="info-item">
+                    <span class="label">Modo:</span>
+                    <span class="value" id="tx-mode-label">-</span>
+                </div>
+            </div>
+            <div class="mining-controls">
+                <button onclick="setTxMode('auto')"   class="btn-mode" id="btn-tx-auto">AUTO</button>
+                <button onclick="setTxMode('manual')" class="btn-mode" id="btn-tx-manual">MANUAL</button>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 4: BLOCKCHAIN (siempre visible)            -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="card">
+            <h2>Blockchain</h2>
+            <div class="info-grid" style="margin-bottom:15px;">
+                <div class="info-item">
+                    <span class="label">Altura de cadena:</span>
+                    <span class="value" id="chain-height">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">Último bloque:</span>
+                    <span class="value monospace small" id="latest-hash">-</span>
+                </div>
+            </div>
+            <h3 style="margin-bottom:10px;">Últimos bloques</h3>
+            <div id="blocks-list" class="blocks-list"></div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 5: RED P2P (siempre visible)               -->
+        <!-- ═══════════════════════════════════════════════════ -->
         <div class="card">
             <h2>Red P2P</h2>
-            <div class="info-item">
+            <div class="info-item" style="margin-bottom:10px;">
                 <span class="label">Peers conectados:</span>
                 <span class="value" id="peers-count">-</span>
             </div>
             <ul id="peers-list" class="peer-list"></ul>
         </div>
 
-        <!-- Mempool Card -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- SECCIÓN 6: MEMPOOL (siempre visible)               -->
+        <!-- ═══════════════════════════════════════════════════ -->
         <div class="card">
             <h2>Mempool</h2>
-            <div class="info-item">
-                <span class="label">Transacciones:</span>
+            <div class="info-item" style="margin-bottom:10px;">
+                <span class="label">TXs pendientes:</span>
                 <span class="value" id="mempool-count">-</span>
             </div>
             <div id="mempool-list" class="tx-list"></div>
         </div>
+
     </div>
 
+    <!-- Pasar dashboard_mode a JavaScript -->
+    <script>
+        const DASHBOARD_MODE = '{{ dashboard_mode }}';
+    </script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>
