@@ -193,6 +193,8 @@ class SeedNode:
             port           = data.get('port')
             node_id        = data.get('node_id', f'node_{port}')
             wallet_address = data.get('wallet_address')
+            dashboard_port = data.get('dashboard_port', 8000)
+
 
             if not all([host, port, wallet_address]):
                 return jsonify({'error': 'host, port y wallet_address son requeridos'}), 400
@@ -203,7 +205,7 @@ class SeedNode:
                 return jsonify({'error': 'port debe ser un número'}), 400
 
             addr = f"{host}:{port}"
-
+            
             with self.lock:
                 self.addresses[addr] = {
                     'host':           host,
@@ -211,6 +213,7 @@ class SeedNode:
                     'node_id':        node_id,
                     'wallet_address': wallet_address,
                     'registered_at':  time.time(),
+                    'dashboard_port': int(dashboard_port),
                 }
 
             self.logger.info(
@@ -264,6 +267,7 @@ class SeedNode:
                         'port':           info['port'],
                         'node_id':        info['node_id'],
                         'wallet_address': info['wallet_address'],
+                        'dashboard_port': info.get('dashboard_port', 8000),
                     })
 
             return jsonify({'addresses': result, 'count': len(result)})

@@ -174,6 +174,7 @@ class TxOrchestrator:
             sender_port=sender['port'],
             to_address=recipient['wallet_address'],
             amount=amount,
+            dashboard_port=sender.get('dashboard_port', self.dashboard_port),
         )
 
     # ──────────────────────────────────────────────────────────
@@ -186,24 +187,11 @@ class TxOrchestrator:
         sender_port: int,
         to_address:  str,
         amount:      float,
+        dashboard_port: int = None,   # ← agregar
     ) -> bool:
-        """
-        Envía instrucción de TX al dashboard de un nodo específico.
-
-        Hace POST /api/tx/create al dashboard del nodo remitente.
-        El nodo crea, firma y propaga la TX normalmente.
-
-        Args:
-            sender_host: IP del nodo remitente.
-            sender_port: Puerto P2P del nodo remitente.
-            to_address:  Wallet address del destinatario.
-            amount:      Cantidad a enviar.
-
-        Returns:
-            True si el nodo aceptó la TX.
-        """
+        port = dashboard_port or self.dashboard_port  # ← agregar
         dashboard_url = (
-            f"http://{sender_host}:{self.dashboard_port}"
+            f"http://{sender_host}:{port}"            # ← cambiar self.dashboard_port por port
             f"/api/tx/create"
         )
 
@@ -267,8 +255,7 @@ class TxOrchestrator:
             Balance del nodo, 0.0 si no está disponible.
         """
         url = (
-            f"http://{node_info['host']}:{self.dashboard_port}"
-            f"/api/wallet"
+            f"http://{node_info['host']}:{node_info.get('dashboard_port', self.dashboard_port)}/api/wallet"
         )
         try:
             loop     = asyncio.get_running_loop()

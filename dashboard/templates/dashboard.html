@@ -46,7 +46,7 @@
             </div>
         </div>
 
-        <!-- ═══════════════════════════════════════════════════ -->
+<!-- ═══════════════════════════════════════════════════ -->
         <!-- SECCIÓN 1B: ENVIAR TX (siempre visible)            -->
         <!-- ═══════════════════════════════════════════════════ -->
         <div class="card">
@@ -75,6 +75,19 @@
                 </div>
                 <button type="submit" class="btn-primary">Enviar Transacción</button>
             </form>
+
+            {% if dashboard_mode == 'auto' %}
+            <div style="margin-top:20px; border-top:1px solid #eee; padding-top:15px;">
+                <div class="info-item" style="margin-bottom:10px;">
+                    <span class="label">TXs automáticas:</span>
+                    <span class="value" id="tx-mode-label">-</span>
+                </div>
+                <div class="mining-controls">
+                    <button onclick="setTxMode('auto')"   class="btn-mode" id="btn-tx-auto">AUTO</button>
+                    <button onclick="setTxMode('manual')" class="btn-mode" id="btn-tx-manual">MANUAL</button>
+                </div>
+            </div>
+            {% endif %}
         </div>
 
         <!-- ═══════════════════════════════════════════════════ -->
@@ -124,26 +137,6 @@
                 {% endif %}
             </div>
         </div>
-
-        <!-- ═══════════════════════════════════════════════════ -->
-        <!-- SECCIÓN 3: TRANSACCIONES AUTOMÁTICAS               -->
-        <!-- Solo visible en modo 'auto'                         -->
-        <!-- ═══════════════════════════════════════════════════ -->
-        {% if dashboard_mode == 'auto' %}
-        <div class="card">
-            <h2>Transacciones automáticas</h2>
-            <div class="info-grid" style="margin-bottom:20px;">
-                <div class="info-item">
-                    <span class="label">Modo:</span>
-                    <span class="value" id="tx-mode-label">-</span>
-                </div>
-            </div>
-            <div class="mining-controls">
-                <button onclick="setTxMode('auto')"   class="btn-mode" id="btn-tx-auto">AUTO</button>
-                <button onclick="setTxMode('manual')" class="btn-mode" id="btn-tx-manual">MANUAL</button>
-            </div>
-        </div>
-        {% endif %}
 
         <!-- ═══════════════════════════════════════════════════ -->
         <!-- SECCIÓN 4: BLOCKCHAIN (siempre visible)            -->

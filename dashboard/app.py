@@ -5,7 +5,12 @@ Sprint 6.2:
 - NodeDashboard acepta dashboard_mode ('manual' o 'auto')
 - El template recibe dashboard_mode para mostrar secciones condicionalmente
 - En modo 'manual': sin controles de minado ni TXs automáticas
-- En modo 'auto':   con controles de minado y TXs (Sprint 6.3)
+- En modo 'auto':   con controles de minado y TXs
+
+Sprint 6.3:
+- NodeDashboard acepta orchestrator opcional
+- Endpoints /api/tx/auto y /api/tx/manual controlan el orquestador compartido
+- En demo LAN: el control del orquestador va en el dashboard global (Sprint 7.1)
 """
 
 import asyncio
@@ -16,17 +21,27 @@ from network.p2p_node import MINING_AUTO, MINING_MANUAL
 class NodeDashboard:
     """Dashboard web para un nodo P2P."""
 
-    def __init__(self, node, dashboard_port: int, dashboard_mode: str = 'manual'):
+    def __init__(
+        self,
+        node,
+        dashboard_port: int,
+        dashboard_mode: str = 'manual',
+        orchestrator=None,
+    ):
         """
         Args:
             node:           Instancia de P2PNode
             dashboard_port: Puerto Flask
             dashboard_mode: 'manual' → sin controles de modo
                             'auto'   → con controles de minado y TXs
+            orchestrator:   Instancia de TxOrchestrator (opcional).
+                            Si se pasa, los endpoints /api/tx/* lo controlan.
+                            None en launcher_manual y en nodos LAN individuales.
         """
         self.node           = node
         self.dashboard_port = dashboard_port
         self.dashboard_mode = dashboard_mode
+        self.orchestrator   = orchestrator  # None si no hay orquestador
         self.app            = Flask(__name__)
         self._setup_routes()
 
@@ -209,6 +224,50 @@ class NodeDashboard:
                 return jsonify({'status': 'ok'})
             except Exception as e:
                 return jsonify({'error': str(e)}), 500
+
+        # ── Control de TXs automáticas (solo si hay orquestador) ──
+        # En launcher_manual: orchestrator=None → retorna 404
+        # En launcher_auto:   orchestrator=TxOrchestrator → controla toda la red
+        # En LAN (Sprint 7.1): se manejará desde el dashboard global
+
+        @self.app.route('/api/tx/auto', methods=['POST'])
+        def api_tx_auto():
+            if self.orchestrator is None:
+                return jsonify({
+                    'error': 'Orquestador no disponible en este modo'
+                }), 404
+            try:
+                from core.tx_orchestrator import ORCH_AUTO
+                self.orchestrator.set_mode(ORCH_AUTO)
+                return jsonify({'status': 'ok', 'tx_mode': ORCH_AUTO})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/tx/manual', methods=['POST'])
+        def api_tx_manual():
+            if self.orchestrator is None:
+                return jsonify({
+                    'error': 'Orquestador no disponible en este modo'
+                }), 404
+            try:
+                from core.tx_orchestrator import ORCH_MANUAL
+                self.orchestrator.set_mode(ORCH_MANUAL)
+                return jsonify({'status': 'ok', 'tx_mode': ORCH_MANUAL})
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+
+        @self.app.route('/api/tx/status', methods=['GET'])
+        def api_tx_status():
+            """Estado del orquestador — para actualizar la UI."""
+            if self.orchestrator is None:
+                return jsonify({'available': False, 'tx_mode': 'manual'})
+            stats = self.orchestrator.get_stats()
+            return jsonify({
+                'available': True,
+                'tx_mode':   stats['mode'],
+                'txs_sent':  stats['txs_sent'],
+                'running':   stats['running'],
+            })
 
         # ── TX manual (siempre disponible) ─────────────────────
 

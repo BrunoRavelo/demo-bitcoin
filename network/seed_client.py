@@ -128,7 +128,7 @@ class SeedClient:
     # Lógica de orquestador (independiente del P2P)
     # ──────────────────────────────────────────────
 
-    def announce_address(self, wallet_address: str) -> bool:
+    def announce_address(self, wallet_address: str, dashboard_port: int = 8000) -> bool:        
         """
         Anuncia la wallet address de este nodo al seed.
 
@@ -151,6 +151,7 @@ class SeedClient:
                     'port':           self.port,
                     'node_id':        self.node_id,
                     'wallet_address': wallet_address,
+                    'dashboard_port': dashboard_port,
                 },
                 timeout=5,
             )

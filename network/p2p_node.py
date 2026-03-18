@@ -106,6 +106,7 @@ class P2PNode:
         self.mining_rewards: float = 0.0
 
         self.logger = setup_logger(self.id)
+        self.dashboard_port = 8000  # sobreescrito por el launcher
 
     # ──────────────────────────────────────────────────────────
     # Arranque
@@ -160,7 +161,7 @@ class P2PNode:
         # 2. Anunciar wallet address al orquestador (independiente del P2P)
         await loop.run_in_executor(
             None,
-            lambda: self.seed_client.announce_address(self.wallet.address)
+            lambda: self.seed_client.announce_address(self.wallet.address, self.dashboard_port)
         )
 
         # 3. Obtener peers iniciales

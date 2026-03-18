@@ -29,6 +29,7 @@ async function updateData() {
         if (DASHBOARD_MODE === 'auto') {
             updateMining(status);
             updateAddressDropdown();
+            updateTxStatus();
         }
 
     } catch (err) {
@@ -99,24 +100,45 @@ function updateMining(status) {
 
 // ──────────────────────────────────────────────────────────
 // Control de modo de TXs (solo modo auto)
-// Se implementará completamente en Sprint 6.3 con el orquestador
 // ──────────────────────────────────────────────────────────
 
 async function setTxMode(mode) {
     try {
-        const labels = { auto: '⚙ Automático', manual: '🖐 Manual' };
-        setText('tx-mode-label', labels[mode] || mode);
+        const endpoint = mode === 'auto' ? '/api/tx/auto' : '/api/tx/manual';
+        const res  = await fetch(endpoint, { method: 'POST' });
+        const data = await res.json();
 
-        ['auto', 'manual'].forEach(m => {
-            const btn = document.getElementById(`btn-tx-${m}`);
-            if (btn) btn.classList.toggle('active', m === mode);
-        });
+        if (data.error) {
+            console.warn('TXs:', data.error);
+            return;
+        }
 
-        // El endpoint real se conectará al orquestador en Sprint 6.3
-        await fetch(`/api/tx/${mode}`, { method: 'POST' });
+        updateTxModeUI(data.tx_mode);
     } catch (e) {
-        // El endpoint aún no existe — se implementa en Sprint 6.3
+        console.error('Error cambiando modo TXs:', e);
     }
+}
+
+async function updateTxStatus() {
+    try {
+        const res  = await fetch('/api/tx/status');
+        const data = await res.json();
+        if (data.available) {
+            updateTxModeUI(data.tx_mode);
+            const sent = document.getElementById('tx-sent-count');
+            if (sent) sent.textContent = data.txs_sent || 0;
+        }
+    } catch (e) { /* silencioso */ }
+}
+
+function updateTxModeUI(mode) {
+    const labels = { auto: '⚙ Automático', manual: '🖐 Manual' };
+    setText('tx-mode-label', labels[mode] || mode);
+
+    ['auto', 'manual'].forEach(m => {
+        const btn = document.getElementById(`btn-tx-${m}`);
+        if (btn) btn.classList.toggle('active', m === mode);
+    });
 }
 
 // ──────────────────────────────────────────────────────────
