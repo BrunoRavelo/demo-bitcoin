@@ -29,7 +29,7 @@ import threading
 
 NUM_NODES  = 5
 BASE_PORT  = 6000
-DIFFICULTY = 3   # Rápido para el demo (~0.5s por bloque)
+DIFFICULTY = 5   # Rápido para el demo (~0.5s por bloque)
 
 NODES_CONFIG = [
     {'port': BASE_PORT,     'bootstrap': []},

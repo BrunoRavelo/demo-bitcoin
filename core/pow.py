@@ -35,7 +35,7 @@ class ProofOfWork:
     cuando llega un bloque externo válido.
     """
 
-    def __init__(self, block_header, difficulty: int = 4):
+    def __init__(self, block_header, difficulty: int = 5):
         """
         Args:
             block_header: Objeto BlockHeader a minar.

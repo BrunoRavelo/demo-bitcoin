@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blockchain Demo — Dashboard Global</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='global.css') }}">
+</head>
+<body>
+    <div class="container">
+
+        <!-- Header -->
+        <div class="header">
+            <h1>🌐 Dashboard Global</h1>
+            <div class="header-meta">
+                <span class="badge" id="seed-badge">Seed: ...</span>
+                <span class="badge" id="refresh-badge">Actualizando...</span>
+            </div>
+        </div>
+
+        <!-- Notificación -->
+        <div id="notification" class="notification hidden"></div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- RESUMEN DE LA RED                                   -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="summary-value" id="s-total-nodes">-</div>
+                <div class="summary-label">Nodos totales</div>
+            </div>
+            <div class="summary-card green">
+                <div class="summary-value" id="s-online">-</div>
+                <div class="summary-label">En línea</div>
+            </div>
+            <div class="summary-card red">
+                <div class="summary-value" id="s-offline">-</div>
+                <div class="summary-label">Sin conexión</div>
+            </div>
+            <div class="summary-card blue">
+                <div class="summary-value" id="s-height">-</div>
+                <div class="summary-label">Altura máxima</div>
+            </div>
+            <div class="summary-card orange">
+                <div class="summary-value" id="s-out-sync">-</div>
+                <div class="summary-label">Desfasados</div>
+            </div>
+            <div class="summary-card purple">
+                <div class="summary-value" id="s-mempool">-</div>
+                <div class="summary-label">TXs en mempool</div>
+            </div>
+            <div class="summary-card">
+                <div class="summary-value" id="s-mined">-</div>
+                <div class="summary-label">Bloques minados</div>
+            </div>
+            <div class="summary-card green">
+                <div class="summary-value" id="s-mining-auto">-</div>
+                <div class="summary-label">Minando en AUTO</div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- CONTROL DEL ORQUESTADOR                            -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        {% if has_orchestrator %}
+        <div class="card">
+            <h2>Control de Transacciones Automáticas</h2>
+            <div class="orch-grid">
+                <div class="orch-stats">
+                    <div class="info-item">
+                        <span class="label">Modo:</span>
+                        <span class="value" id="orch-mode">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">TXs enviadas:</span>
+                        <span class="value" id="orch-sent">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Fallidas:</span>
+                        <span class="value" id="orch-failed">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Tasa de éxito:</span>
+                        <span class="value" id="orch-rate">-</span>
+                    </div>
+                </div>
+                <div class="orch-controls">
+                    <button onclick="setOrchMode('auto')"   class="btn-mode" id="btn-orch-auto">AUTO</button>
+                    <button onclick="setOrchMode('manual')" class="btn-mode" id="btn-orch-manual">MANUAL</button>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- TABLA DE NODOS                                      -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="card">
+            <h2>Estado de los Nodos</h2>
+            <div class="table-wrapper">
+                <table id="nodes-table">
+                    <thead>
+                        <tr>
+                            <th>Nodo</th>
+                            <th>Estado</th>
+                            <th>Altura</th>
+                            <th>Sync</th>
+                            <th>Balance</th>
+                            <th>Peers</th>
+                            <th>Mempool</th>
+                            <th>Minado</th>
+                            <th>Bloques</th>
+                            <th>Dashboard</th>
+                        </tr>
+                    </thead>
+                    <tbody id="nodes-tbody">
+                        <tr>
+                            <td colspan="10" class="empty">Conectando al seed...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+
+    <script src="{{ url_for('static', filename='global.js') }}"></script>
+</body>
+</html>
