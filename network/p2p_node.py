@@ -335,7 +335,7 @@ class P2PNode:
     # Conexiones entrantes
     # ──────────────────────────────────────────────────────────
 
-    async def handle_incoming_connection(self, websocket, path):
+    async def handle_incoming_connection(self, websocket, path=None):
         peer_address = None
         try:
             remote = websocket.remote_address
