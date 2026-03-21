@@ -1,8 +1,4 @@
-// Dashboard — lógica completa
-// DASHBOARD_MODE viene definido en el HTML por Jinja2
-
 let lastHeight  = 0;
-let currentMode = '';
 
 // ──────────────────────────────────────────────────────────
 // Loop principal
@@ -94,8 +90,6 @@ function updateMining(status) {
         indicator.classList.toggle('hidden', mode !== 'auto');
         if (mode === 'auto') setText('mining-height', status.chain_height || '-');
     }
-
-    currentMode = mode;
 }
 
 // ──────────────────────────────────────────────────────────

@@ -1,12 +1,10 @@
 """
-Nodo P2P completo
-Sprint 4.3 — Minado asíncrono con cancelación
+Nodo P2P completo con minado asíncrono y cancelación.
 
-Cambios:
-- start_mining_loop(): corre mine_block_cancellable() en executor thread
-- stop_mining() / pause_mining() / resume_mining(): control de modos
-- handle_block() cancela el minado activo y reinicia al recibir bloque externo
-- Tres modos: AUTO, MANUAL, PAUSED
+Modos de minado:
+    AUTO   — mina continuamente, cancela al recibir bloque externo
+    MANUAL — solo mina al llamar mine_once()
+    PAUSED — no mina, estado inicial en tests y demo_tx_cli
 """
 
 import asyncio
@@ -139,8 +137,6 @@ class P2PNode:
             asyncio.create_task(self.start_mining_loop())
 
         await asyncio.Future()
-
-    # ── Método completo para reemplazar en p2p_node.py ────────────────────────
 
     async def _bootstrap_from_seed(self):
         """

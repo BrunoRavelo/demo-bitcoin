@@ -1,16 +1,9 @@
 """
 Dashboard Flask para cada nodo P2P
 
-Sprint 6.2:
-- NodeDashboard acepta dashboard_mode ('manual' o 'auto')
-- El template recibe dashboard_mode para mostrar secciones condicionalmente
-- En modo 'manual': sin controles de minado ni TXs automáticas
-- En modo 'auto':   con controles de minado y TXs
-
-Sprint 6.3:
-- NodeDashboard acepta orchestrator opcional
-- Endpoints /api/tx/auto y /api/tx/manual controlan el orquestador compartido
-- En demo LAN: el control del orquestador va en el dashboard global (Sprint 7.1)
+Modos:
+    'manual' — controles básicos: wallet, enviar TX, minar manualmente
+    'auto'   — además: toggle minado AUTO/MANUAL, TXs automáticas con orquestador
 """
 
 import asyncio
@@ -56,18 +49,6 @@ class NodeDashboard:
                 dashboard_port=self.dashboard_port,
                 dashboard_mode=self.dashboard_mode,
             )
-
-        @self.app.route('/api/info')
-        def api_info():
-            return jsonify({
-                'node_id':        self.node.id,
-                'address':        self.node.wallet.address,
-                'balance':        self.node.get_balance(),
-                'peers_count':    len(self.node.peers_connected),
-                'mempool_count':  len(self.node.blockchain.mempool),
-                'chain_height':   self.node.blockchain.get_height(),
-                'dashboard_mode': self.dashboard_mode,
-            })
 
         @self.app.route('/api/status')
         def api_status():
@@ -228,7 +209,7 @@ class NodeDashboard:
         # ── Control de TXs automáticas (solo si hay orquestador) ──
         # En launcher_manual: orchestrator=None → retorna 404
         # En launcher_auto:   orchestrator=TxOrchestrator → controla toda la red
-        # En LAN (Sprint 7.1): se manejará desde el dashboard global
+        # En LAN: controlado desde dashboard global (main_global.py)
 
         @self.app.route('/api/tx/auto', methods=['POST'])
         def api_tx_auto():
