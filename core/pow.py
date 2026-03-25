@@ -1,15 +1,16 @@
 """
-Proof of Work (PoW) — Minado
-Encuentra un nonce que haga que el hash del bloque cumpla con la difficulty
+Proof of Work — Sprint 9.2
 
-Sprint 4.3:
-- mine() acepta stop_event (threading.Event) para cancelación limpia
-- Permite interrumpir el minado cuando llega un bloque externo
+Usa comparación numérica de 256 bits (idéntico a Bitcoin):
+    int(hash, 16) < target
 
-En Bitcoin:
-- Difficulty ajustable (cada 2016 bloques ~2 semanas)
-- Objetivo: 1 bloque cada ~10 minutos
-- Actualmente: ~19 ceros al inicio del hash
+En lugar del sistema anterior de contar ceros:
+    hash.startswith('0' * difficulty)
+
+Ventaja del target numérico:
+    - Ajuste continuo y granular (no en saltos discretos)
+    - Permite acercarse exactamente al tiempo objetivo
+    - Comportamiento idéntico al protocolo real de Bitcoin
 """
 
 import time
@@ -19,103 +20,91 @@ from typing import Optional
 
 class ProofOfWork:
     """
-    Sistema de Proof of Work.
+    Encuentra el nonce que hace que int(header.hash(), 16) < target.
 
-    Objetivo: encontrar un nonce tal que:
-        SHA256d(block_header) empiece con X ceros
+    El proceso es idéntico a Bitcoin:
+    1. Incrementar nonce desde 0
+    2. Calcular hash del header
+    3. Interpretar hash como número de 256 bits
+    4. Si es menor que target → nonce válido encontrado
+    5. Si no → incrementar nonce y repetir
 
-    Difficulty 3 → ~4,000 intentos   (~0.5s)
-    Difficulty 4 → ~65,000 intentos  (~5-15s)
-    Difficulty 5 → ~1,000,000 intentos (~60s)
-
-    Cancelación:
-    mine() acepta un threading.Event opcional. Si el evento se activa
-    durante el minado, mine() retorna None inmediatamente.
-    Esto permite que el event loop de asyncio cancele el minado
-    cuando llega un bloque externo válido.
+    El target determina la dificultad:
+        target alto → muchos hashes válidos → fácil
+        target bajo → pocos hashes válidos  → difícil
     """
 
-    def __init__(self, block_header, difficulty: int = 5):
+    def __init__(self, header, target: int):
         """
         Args:
-            block_header: Objeto BlockHeader a minar.
-            difficulty:   Número de ceros requeridos al inicio del hash.
+            header: BlockHeader con método hash()
+            target: Número de 256 bits. Hash válido si int(hash,16) < target
         """
-        self.header     = block_header
-        self.difficulty = difficulty
-        self.target     = '0' * difficulty
+        self.header = header
+        self.target = target
 
     def mine(self, stop_event: Optional[threading.Event] = None) -> Optional[int]:
         """
-        Encuentra el nonce que satisface la difficulty.
-
-        Proceso:
-        1. Probar nonce = 0, 1, 2, 3, ...
-        2. Para cada nonce: calcular hash del header
-        3. Si hash empieza con target ceros → retornar nonce
-        4. Si stop_event está activo → retornar None (cancelado)
-        5. Si no → incrementar nonce y repetir
+        Busca el nonce válido incrementando desde 0.
 
         Args:
-            stop_event: threading.Event opcional. Si se activa durante
-                        el minado, la función retorna None limpiamente.
-                        Si es None, mina sin posibilidad de cancelación.
+            stop_event: threading.Event para cancelar el minado.
+                        Si se activa, retorna None limpiamente.
 
         Returns:
-            Nonce válido si tuvo éxito.
-            None si fue cancelado via stop_event.
+            Nonce válido, o None si fue cancelado.
         """
+        # Cancelación inmediata si el evento ya está activo
+        if stop_event is not None and stop_event.is_set():
+            return None
+
         nonce      = 0
         start_time = time.time()
-
-        print(f"[POW] Iniciando (difficulty={self.difficulty}, target='{self.target}')...")
+        log_every  = 10_000
 
         while True:
-            # Verificar cancelación cada iteración
-            if stop_event is not None and stop_event.is_set():
-                elapsed = time.time() - start_time
-                print(
-                    f"[POW] Cancelado tras {nonce:,} intentos "
-                    f"({elapsed:.2f}s)"
-                )
-                return None
+            # Verificar cancelación periódicamente
+            if stop_event is not None and nonce % 1000 == 0:
+                if stop_event.is_set():
+                    elapsed = time.time() - start_time
+                    print(
+                        f"[POW] Cancelado tras {nonce:,} intentos "
+                        f"({elapsed:.2f}s)\n"
+                    )
+                    return None
 
             self.header.nonce = nonce
-            block_hash        = self.header.hash()
+            hash_int = int(self.header.hash(), 16)
 
-            if block_hash.startswith(self.target):
-                elapsed = time.time() - start_time
-                rate    = nonce / elapsed if elapsed > 0 else 0
+            if hash_int < self.target:
+                elapsed   = time.time() - start_time
+                hashrate  = nonce / elapsed if elapsed > 0 else 0
                 print(
                     f"[POW] ¡Bloque minado!\n"
                     f"      Nonce:    {nonce:,}\n"
-                    f"      Hash:     {block_hash}\n"
+                    f"      Hash:     {self.header.hash()}\n"
                     f"      Tiempo:   {elapsed:.2f}s\n"
-                    f"      Intentos: {nonce + 1:,} ({rate:,.0f} h/s)"
+                    f"      Intentos: {nonce:,} ({hashrate:,.0f} h/s)\n"
                 )
                 return nonce
 
-            nonce += 1
+            # Log de progreso
+            if nonce > 0 and nonce % log_every == 0:
+                elapsed  = time.time() - start_time
+                hashrate = nonce / elapsed if elapsed > 0 else 0
+                print(f"[POW] {nonce:,} intentos ({hashrate:,.0f} h/s)...")
 
-            # Log de progreso cada 10,000 intentos
-            if nonce % 10000 == 0:
-                elapsed = time.time() - start_time
-                rate    = nonce / elapsed if elapsed > 0 else 0
-                print(f"[POW] {nonce:,} intentos ({rate:,.0f} h/s)...")
+            nonce += 1
 
     def validate(self, nonce: int) -> bool:
         """
-        Valida que un nonce produce un hash válido.
-        Usado para verificar bloques recibidos de otros nodos.
+        Verifica que un nonce produce un hash válido.
 
         Args:
-            nonce: Nonce a validar.
+            nonce: Nonce a verificar
 
         Returns:
-            True si el hash cumple la difficulty.
+            True si int(hash, 16) < target
         """
         self.header.nonce = nonce
-        return self.header.hash().startswith(self.target)
-
-    def __repr__(self):
-        return f"ProofOfWork(difficulty={self.difficulty}, target='{self.target}')"
+        return int(self.header.hash(), 16) < self.target

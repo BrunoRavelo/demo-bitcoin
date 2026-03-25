@@ -6,10 +6,12 @@ consultando sus dashboards individuales (/api/status).
 No comparte memoria con los nodos — funciona igual en local y LAN.
 
 Endpoints:
-    GET  /                      — página principal
-    GET  /api/network           — estado de toda la red
-    GET  /api/orchestrator      — estado del orquestador
-    POST /api/orchestrator/auto — activar TXs automáticas
+    GET  /                        — página principal
+    GET  /api/network             — estado de toda la red
+    GET  /api/chain               — cadena completa desde un nodo sincronizado
+    GET  /api/block/<hash>        — detalle de un bloque
+    GET  /api/orchestrator        — estado del orquestador
+    POST /api/orchestrator/auto   — activar TXs automáticas
     POST /api/orchestrator/manual — pausar TXs automáticas
 """
 
@@ -81,7 +83,6 @@ class GlobalDashboard:
                     'seed_online':  False,
                 })
 
-            # Consultar todos los nodos en paralelo
             nodes_status = []
             threads      = []
             results      = [None] * len(addresses)
@@ -101,12 +102,10 @@ class GlobalDashboard:
 
             nodes_status = [r for r in results if r is not None]
 
-            # Calcular altura máxima para detectar forks
             max_height = max(
                 (n['chain_height'] for n in nodes_status), default=1
             )
 
-            # Marcar nodos desfasados
             for node in nodes_status:
                 lag = max_height - node['chain_height']
                 node['lag']      = lag
@@ -120,6 +119,68 @@ class GlobalDashboard:
                 'summary':     summary,
                 'seed_online': True,
             })
+
+        # ── API: cadena de bloques ─────────────────────────────
+
+        @self.app.route('/api/chain')
+        def api_chain():
+            """
+            Obtiene la cadena de bloques desde el nodo más avanzado
+            y sincronizado de la red.
+
+            Query params opcionales:
+                count: número de bloques a retornar (default: 10)
+            """
+            count = int(request.args.get('count', 10))
+
+            # Obtener nodo más avanzado y online
+            node_info = self._get_best_node()
+            if not node_info:
+                return jsonify({'blocks': [], 'height': 0, 'error': 'Sin nodos disponibles'})
+
+            host           = node_info['host']
+            dashboard_port = node_info.get('dashboard_port', 8000)
+
+            try:
+                # Pedir cadena al dashboard del nodo
+                url      = f"http://{host}:{dashboard_port}/api/chain"
+                response = requests.get(url, params={'count': count}, timeout=3)
+
+                if response.status_code != 200:
+                    return jsonify({'blocks': [], 'height': 0, 'error': 'Error al obtener cadena'})
+
+                data         = response.json()
+                data['node'] = node_info.get('node_id', '-')
+                return jsonify(data)
+
+            except Exception as e:
+                return jsonify({'blocks': [], 'height': 0, 'error': str(e)})
+
+        # ── API: detalle de un bloque ──────────────────────────
+
+        @self.app.route('/api/block/<block_hash>')
+        def api_block(block_hash):
+            """
+            Obtiene el detalle de un bloque específico desde
+            cualquier nodo que lo tenga.
+            """
+            node_info = self._get_best_node()
+            if not node_info:
+                return jsonify({'error': 'Sin nodos disponibles'}), 503
+
+            host           = node_info['host']
+            dashboard_port = node_info.get('dashboard_port', 8000)
+
+            try:
+                url      = f"http://{host}:{dashboard_port}/api/block/{block_hash}"
+                response = requests.get(url, timeout=3)
+
+                if response.status_code == 200:
+                    return jsonify(response.json())
+                return jsonify({'error': 'Bloque no encontrado'}), 404
+
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
 
         # ── API: estado del orquestador ────────────────────────
 
@@ -173,7 +234,6 @@ class GlobalDashboard:
         except Exception:
             pass
 
-        # Nodo no responde
         return {
             'node_id':        node_id,
             'online':         False,
@@ -189,18 +249,40 @@ class GlobalDashboard:
             'wallet_address': node_info.get('wallet_address', '-'),
         }
 
+    def _get_best_node(self) -> dict:
+        """
+        Retorna el nodo online con mayor altura de cadena.
+        Usado para consultar la cadena y bloques individuales.
+        """
+        addresses = self.seed_client.get_addresses()
+        if not addresses:
+            return None
+
+        best      = None
+        best_height = -1
+
+        for node_info in addresses:
+            host           = node_info['host']
+            dashboard_port = node_info.get('dashboard_port', 8000)
+            try:
+                r = requests.get(
+                    f"http://{host}:{dashboard_port}/api/status",
+                    timeout=2
+                )
+                if r.status_code == 200:
+                    height = r.json().get('chain_height', 0)
+                    if height > best_height:
+                        best_height = height
+                        best        = node_info
+            except Exception:
+                continue
+
+        return best
+
     def _build_summary(self, nodes: list, max_height: int) -> dict:
-        online    = [n for n in nodes if n['online']]
-        in_sync   = [n for n in online if n.get('in_sync', True)]
-        out_sync  = [n for n in online if not n.get('in_sync', True)]
-
-        total_mempool = sum(n.get('mempool_count', 0) for n in online)
-        total_mined   = sum(n.get('blocks_mined', 0) for n in online)
-        total_rewards = sum(n.get('mining_rewards', 0.0) for n in online)
-
-        mining_auto   = sum(
-            1 for n in online if n.get('mining_mode') == 'auto'
-        )
+        online   = [n for n in nodes if n['online']]
+        in_sync  = [n for n in online if n.get('in_sync', True)]
+        out_sync = [n for n in online if not n.get('in_sync', True)]
 
         return {
             'total_nodes':   len(nodes),
@@ -209,10 +291,10 @@ class GlobalDashboard:
             'in_sync':       len(in_sync),
             'out_of_sync':   len(out_sync),
             'max_height':    max_height,
-            'total_mempool': total_mempool,
-            'total_mined':   total_mined,
-            'total_rewards': total_rewards,
-            'mining_auto':   mining_auto,
+            'total_mempool': sum(n.get('mempool_count', 0) for n in online),
+            'total_mined':   sum(n.get('blocks_mined', 0) for n in online),
+            'total_rewards': sum(n.get('mining_rewards', 0.0) for n in online),
+            'mining_auto':   sum(1 for n in online if n.get('mining_mode') == 'auto'),
         }
 
     def _empty_summary(self) -> dict:

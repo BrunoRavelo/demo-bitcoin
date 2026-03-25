@@ -27,7 +27,7 @@ El PoW cumple tres funciones críticas:
 | Ajuste de difficulty | Cada 2016 bloques (~2 semanas) | Fija por instancia |
 | Objetivo de tiempo | ~10 minutos por bloque | Sin objetivo temporal |
 | Nonce | 32 bits (0 a 4,294,967,295) | Entero sin límite (int Python) |
-| Recompensa | Coinbase TX (subsidy + fees) | No implementada aún |
+|Recompensa | Coinbase TX (subsidy + fees) | Coinbase TX (50 coins fijos, sin fees)|
 | Hardware | ASICs especializados | CPU (demo educativo) |
 
 **Diferencia principal en el target:** Bitcoin define la difficulty como un número de 256 bits; si el hash interpretado como número es menor al target, el bloque es válido. Este demo simplifica eso a contar ceros al inicio del hash hex, lo cual es conceptualmente equivalente y mucho más legible.

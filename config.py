@@ -1,103 +1,73 @@
 """
-Configuración central del demo de blockchain
-Modifica este archivo para ajustar el comportamiento de toda la red
+Configuración central del demo blockchain.
 
-Para el laboratorio: cambia SEED_HOST a la IP de la máquina del instructor
+Todos los parámetros del sistema se definen aquí.
+Cambiar este archivo afecta a todos los componentes.
 """
 
 import os
 
-# ─────────────────────────────────────────────
-# RED
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────
+# Red
+# ──────────────────────────────────────────────────────────
 
-# IP y puerto del seed node (máquina del instructor)
-# En desarrollo local usar 'localhost'
-# En laboratorio usar la IP real: '192.168.1.X'
 SEED_HOST = os.environ.get('SEED_HOST', 'localhost')
 SEED_PORT = int(os.environ.get('SEED_PORT', 8888))
 
-# Puerto base para nodos P2P
-# Cada nodo usa P2P_PORT + offset si corren varios en la misma máquina
-P2P_PORT = int(os.environ.get('P2P_PORT', 5000))
-
-# Puerto base para dashboards Flask
+P2P_PORT       = int(os.environ.get('P2P_PORT', 5000))
 DASHBOARD_PORT = int(os.environ.get('DASHBOARD_PORT', 8000))
 
-# Puerto para el dashboard global (observador)
-GLOBAL_DASHBOARD_PORT = int(os.environ.get('GLOBAL_DASHBOARD_PORT', 9000))
-
-# Límites de conexiones (igual que Bitcoin)
 MAX_OUTBOUND_CONNECTIONS = 8
-MAX_INBOUND_CONNECTIONS = 125
-MAX_PEERS_TO_SHARE = 10
+MAX_INBOUND_CONNECTIONS  = 8
+MAX_PEERS_TO_SHARE       = 10
 
-# ─────────────────────────────────────────────
-# BLOCKCHAIN
-# ─────────────────────────────────────────────
+CONNECT_TIMEOUT  = 5    # segundos
+GOSSIP_INTERVAL  = 30   # segundos entre ciclos de gossip
+PING_INTERVAL    = 30   # segundos entre pings
+CLEANUP_INTERVAL = 60   # segundos entre limpiezas
 
-# Número de ceros requeridos al inicio del hash
-# 3 → ~500 intentos   (~0.1s)   — para demos rápidos
-# 4 → ~65,000 intentos (~5-15s) — default actual
-# 5 → ~1M intentos    (~60s)    — para demos lentos/dramáticos
-DIFFICULTY = int(os.environ.get('DIFFICULTY', 4))
+# ──────────────────────────────────────────────────────────
+# Difficulty ajustable — target numérico (estilo Bitcoin)
+# ──────────────────────────────────────────────────────────
 
-# Recompensa por minar un bloque (coins)
-BLOCK_REWARD = 50
+# Target máximo posible (cualquier hash es válido)
+MAX_TARGET = 2**256 - 1
 
-# Máximo de transacciones por bloque
-MAX_TXS_PER_BLOCK = 10
+# Target inicial calibrado para ~180s por bloque a 50,000 h/s:
+#   50,000 h/s × 180s = 9,000,000 hashes esperados
+#   INITIAL_TARGET = MAX_TARGET // 9_000_000
+INITIAL_TARGET = MAX_TARGET // 9_000_000
 
-# Máximo de transacciones en el mempool
-MAX_MEMPOOL_SIZE = 1000
+# Tiempo objetivo por bloque en segundos
+TARGET_BLOCK_TIME = 180  # 3 minutos
 
-# ─────────────────────────────────────────────
-# MINADO AUTOMÁTICO
-# ─────────────────────────────────────────────
+# Ajustar difficulty cada N bloques (como Bitcoin usa 2016)
+DIFFICULTY_ADJUSTMENT_INTERVAL = 5
 
-# Si True, cada nodo mina automáticamente al arrancar
+# Factor máximo de ajuste por ciclo (4x = igual que Bitcoin)
+MAX_ADJUSTMENT_FACTOR = 4
+
+# ──────────────────────────────────────────────────────────
+# Blockchain
+# ──────────────────────────────────────────────────────────
+
+BLOCK_REWARD       = 50
+MAX_MEMPOOL_SIZE   = 100
+MAX_TXS_PER_BLOCK  = 10
+
+# ──────────────────────────────────────────────────────────
+# Minado
+# ──────────────────────────────────────────────────────────
+
+# True  → nodos arrancan minando automáticamente
+# False → nodos arrancan en modo PAUSED (tests, demo manual)
 MINING_AUTO_START = True
 
-# ─────────────────────────────────────────────
-# TRANSACCIONES AUTOMÁTICAS
-# ─────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────
+# Orquestador de TXs automáticas
+# ──────────────────────────────────────────────────────────
 
-# Si True, cada nodo genera transacciones automáticas al arrancar
-TX_AUTO_START = True
-
-# Intervalo base entre transacciones automáticas (segundos)
-TX_AUTO_BASE_INTERVAL = 15
-
-# Jitter máximo para el intervalo (segundos)
-# Intervalo real = BASE + random(0, JITTER)
-# Evita que todos los nodos envíen TXs simultáneamente
-TX_AUTO_JITTER = 10
-
-# Monto máximo de una transacción automática (fracción del balance)
-TX_AUTO_MAX_FRACTION = 0.2  # Máximo 20% del balance disponible
-
-# ─────────────────────────────────────────────
-# INTERVALOS DE RED
-# ─────────────────────────────────────────────
-
-# Cada cuántos segundos solicitar peers (gossip)
-GOSSIP_INTERVAL = 60
-
-# Cada cuántos segundos enviar ping (keep-alive)
-PING_INTERVAL = 30
-
-# Cada cuántos segundos limpiar peers y mensajes vistos
-CLEANUP_INTERVAL = 300
-
-# Tiempo máximo de espera para conectar a un peer (segundos)
-CONNECT_TIMEOUT = 5.0
-
-# ─────────────────────────────────────────────
-# LOGGING
-# ─────────────────────────────────────────────
-
-# Directorio donde se guardan los logs de cada nodo
-LOG_DIR = 'logs'
-
-# Nivel de logging: DEBUG, INFO, WARNING, ERROR
-LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO')
+TX_AUTO_START         = True   # True → ORCH_AUTO al arrancar
+TX_AUTO_BASE_INTERVAL = 15     # segundos entre TXs automáticas
+TX_AUTO_JITTER        = 10     # variación aleatoria (evita sincronización)
+TX_AUTO_MAX_FRACTION  = 0.2    # máximo 20% del balance por TX automática

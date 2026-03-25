@@ -60,6 +60,98 @@
         </div>
 
         <!-- ═══════════════════════════════════════════════════ -->
+        <!-- VISTA DE LA CADENA                                  -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="card">
+            <div class="chain-header">
+                <h2>Blockchain</h2>
+                <span class="chain-source" id="chain-source"></span>
+            </div>
+
+            <!-- Último bloque destacado -->
+            <div class="latest-block-info" id="latest-block-info" style="display:none;">
+                <div class="latest-block-grid">
+                    <div class="latest-info-item">
+                        <span class="latest-label">Último bloque</span>
+                        <span class="latest-value monospace" id="lb-height">#-</span>
+                    </div>
+                    <div class="latest-info-item">
+                        <span class="latest-label">Hash</span>
+                        <span class="latest-value monospace small" id="lb-hash">-</span>
+                    </div>
+                    <div class="latest-info-item">
+                        <span class="latest-label">Nonce</span>
+                        <span class="latest-value" id="lb-nonce">-</span>
+                    </div>
+                    <div class="latest-info-item">
+                        <span class="latest-label">Transacciones</span>
+                        <span class="latest-value" id="lb-txs">-</span>
+                    </div>
+                    <div class="latest-info-item">
+                        <span class="latest-label">Minado por</span>
+                        <span class="latest-value monospace small" id="lb-miner">-</span>
+                    </div>
+                    <div class="latest-info-item">
+                        <span class="latest-label">Hora</span>
+                        <span class="latest-value" id="lb-time">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Vista gráfica de la cadena -->
+            <div class="chain-scroll-wrapper">
+                <div class="chain-visual" id="chain-visual">
+                    <div class="chain-loading">Cargando cadena...</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
+        <!-- PANEL DE DETALLE DE BLOQUE (oculto por defecto)    -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="card block-detail-panel hidden" id="block-detail-panel">
+            <div class="block-detail-header">
+                <h2>Detalle del Bloque <span id="bd-height"></span></h2>
+                <button class="btn-close" onclick="closeBlockDetail()">✕ Cerrar</button>
+            </div>
+
+            <div class="block-detail-meta">
+                <div class="bd-item">
+                    <span class="bd-label">Hash</span>
+                    <span class="bd-value monospace" id="bd-hash">-</span>
+                </div>
+                <div class="bd-item">
+                    <span class="bd-label">Hash anterior</span>
+                    <span class="bd-value monospace" id="bd-prev-hash">-</span>
+                </div>
+                <div class="bd-item">
+                    <span class="bd-label">Merkle Root</span>
+                    <span class="bd-value monospace" id="bd-merkle">-</span>
+                </div>
+                <div class="bd-item">
+                    <span class="bd-label">Nonce</span>
+                    <span class="bd-value" id="bd-nonce">-</span>
+                </div>
+                <div class="bd-item">
+                    <span class="bd-label">Difficulty</span>
+                    <span class="bd-value" id="bd-difficulty">-</span>
+                </div>
+                <div class="bd-item">
+                    <span class="bd-label">Timestamp</span>
+                    <span class="bd-value" id="bd-timestamp">-</span>
+                </div>
+            </div>
+
+            <h3 style="margin: 20px 0 12px;">
+                Transacciones
+                <span class="tx-count-badge" id="bd-tx-count"></span>
+            </h3>
+            <div class="tx-list-detail" id="bd-tx-list">
+                <div class="empty">Cargando transacciones...</div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
         <!-- CONTROL DEL ORQUESTADOR                            -->
         <!-- ═══════════════════════════════════════════════════ -->
         {% if has_orchestrator %}

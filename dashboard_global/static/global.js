@@ -1,13 +1,14 @@
-// Dashboard Global — lógica frontend
-// Auto-refresh cada 3 segundos (más lento que el individual para no saturar)
+// Dashboard Global — lógica completa Sprint 9.1
+// Cadena visual + detalle de bloques clickeables
 
 let lastMaxHeight = 0;
+let chainRefreshInterval = null;
 
 // ──────────────────────────────────────────────────────────
-// Loop principal
+// Loop principal — red + cadena en paralelo
 // ──────────────────────────────────────────────────────────
 
-async function updateNetwork() {
+async function updateAll() {
     try {
         const [network, orch] = await Promise.all([
             fetch('/api/network').then(r => r.json()),
@@ -26,8 +27,22 @@ async function updateNetwork() {
     }
 }
 
+async function updateChain() {
+    try {
+        const data = await fetch('/api/chain?count=10').then(r => r.json());
+        if (data.blocks && data.blocks.length > 0) {
+            renderChainVisual(data.blocks, data.height);
+            updateLatestBlockInfo(data.blocks[0]);
+            const src = document.getElementById('chain-source');
+            if (src) src.textContent = `fuente: ${data.node || '-'}`;
+        }
+    } catch (err) {
+        console.error('Error cargando cadena:', err);
+    }
+}
+
 // ──────────────────────────────────────────────────────────
-// Seed badge
+// Resumen de red
 // ──────────────────────────────────────────────────────────
 
 function updateSeedBadge(online) {
@@ -40,13 +55,8 @@ function updateSeedBadge(online) {
 function updateRefreshBadge() {
     const el = document.getElementById('refresh-badge');
     if (!el) return;
-    const now = new Date().toLocaleTimeString();
-    el.textContent = `Actualizado: ${now}`;
+    el.textContent = `Actualizado: ${new Date().toLocaleTimeString()}`;
 }
-
-// ──────────────────────────────────────────────────────────
-// Resumen
-// ──────────────────────────────────────────────────────────
 
 function updateSummary(s) {
     setText('s-total-nodes', s.total_nodes);
@@ -58,17 +68,158 @@ function updateSummary(s) {
     setText('s-mined',       s.total_mined);
     setText('s-mining-auto', s.mining_auto);
 
-    // Notificación si la altura aumentó
     if (lastMaxHeight > 0 && s.max_height > lastMaxHeight) {
         showNotification(`¡Nuevo bloque #${s.max_height - 1} confirmado en la red!`);
+        updateChain(); // Actualizar cadena cuando hay bloque nuevo
     }
     lastMaxHeight = s.max_height;
 
-    // Colorear tarjeta de desfasados
     const outCard = document.getElementById('s-out-sync')?.closest('.summary-card');
-    if (outCard) {
-        outCard.style.background = s.out_of_sync > 0 ? '#fff3e0' : '';
+    if (outCard) outCard.style.background = s.out_of_sync > 0 ? '#fff3e0' : '';
+}
+
+// ──────────────────────────────────────────────────────────
+// Vista gráfica de la cadena
+// ──────────────────────────────────────────────────────────
+
+function renderChainVisual(blocks, totalHeight) {
+    const container = document.getElementById('chain-visual');
+    if (!container) return;
+
+    // blocks viene en orden descendente (más reciente primero)
+    // Para la vista visual queremos de izquierda a derecha: más antiguo → más reciente
+    const ordered = [...blocks].reverse();
+
+    const items = ordered.map((b, i) => {
+        const isLatest   = i === ordered.length - 1;
+        const isGenesis  = b.height === 0;
+        const txLabel    = b.txs === 1 ? '1 TX' : `${b.txs} TXs`;
+        const minerShort = b.mined_by ? b.mined_by.slice(0, 8) + '...' : 'génesis';
+
+        return `
+            ${i > 0 ? '<div class="chain-arrow">→</div>' : ''}
+            <div class="chain-block ${isLatest ? 'chain-block-latest' : ''} ${isGenesis ? 'chain-block-genesis' : ''}"
+                 onclick="showBlockDetail('${b.full_hash}')"
+                 title="Click para ver detalle">
+                <div class="cb-height">#${b.height}</div>
+                <div class="cb-hash monospace">${b.hash}</div>
+                <div class="cb-meta">
+                    <span class="cb-txs">${txLabel}</span>
+                    <span class="cb-miner">⛏ ${minerShort}</span>
+                </div>
+                <div class="cb-time">${formatTime(b.timestamp)}</div>
+            </div>
+        `;
+    }).join('');
+
+    // Si hay más bloques que los mostrados, agregar indicador al inicio
+    const hiddenCount = totalHeight - blocks.length;
+    const prefix = hiddenCount > 0
+        ? `<div class="chain-ellipsis">... ${hiddenCount} bloques anteriores</div>
+           <div class="chain-arrow">→</div>`
+        : '';
+
+    container.innerHTML = prefix + items;
+
+    // Hacer scroll al bloque más reciente
+    container.scrollLeft = container.scrollWidth;
+}
+
+// ──────────────────────────────────────────────────────────
+// Info del último bloque
+// ──────────────────────────────────────────────────────────
+
+function updateLatestBlockInfo(block) {
+    const panel = document.getElementById('latest-block-info');
+    if (!panel) return;
+
+    panel.style.display = 'block';
+    setText('lb-height', `#${block.height}`);
+    setText('lb-hash',   block.full_hash || block.hash);
+    setText('lb-nonce',  (block.nonce || 0).toLocaleString());
+    setText('lb-txs',    block.txs);
+    setText('lb-miner',  block.mined_by || '-');
+    setText('lb-time',   formatTime(block.timestamp));
+}
+
+// ──────────────────────────────────────────────────────────
+// Panel de detalle de bloque
+// ──────────────────────────────────────────────────────────
+
+async function showBlockDetail(fullHash) {
+    const panel = document.getElementById('block-detail-panel');
+    if (!panel) return;
+
+    // Mostrar panel con estado de carga
+    panel.classList.remove('hidden');
+    document.getElementById('bd-tx-list').innerHTML = '<div class="empty">Cargando...</div>';
+    panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+    try {
+        const block = await fetch(`/api/block/${fullHash}`).then(r => r.json());
+
+        if (block.error) {
+            document.getElementById('bd-tx-list').innerHTML =
+                `<div class="empty">Error: ${block.error}</div>`;
+            return;
+        }
+
+        // Meta del bloque
+        const heightEl = document.getElementById('bd-height');
+        if (heightEl) heightEl.textContent = `#${block.height ?? ''}`;
+
+        setText('bd-hash',       block.hash);
+        setText('bd-prev-hash',  block.prev_hash);
+        setText('bd-merkle',     block.merkle_root);
+        setText('bd-nonce',      (block.nonce || 0).toLocaleString());
+        setText('bd-difficulty', block.difficulty);
+        setText('bd-timestamp',  block.timestamp ? new Date(block.timestamp * 1000).toLocaleString() : '-');
+
+        const countEl = document.getElementById('bd-tx-count');
+        if (countEl) countEl.textContent = `${block.tx_count} TX${block.tx_count !== 1 ? 's' : ''}`;
+
+        // Lista de transacciones
+        const txList = document.getElementById('bd-tx-list');
+        if (!block.txs || block.txs.length === 0) {
+            txList.innerHTML = '<div class="empty">Sin transacciones</div>';
+            return;
+        }
+
+        txList.innerHTML = block.txs.map(tx => `
+            <div class="tx-detail-item ${tx.type === 'coinbase' ? 'tx-coinbase' : ''}">
+                <div class="tx-detail-header">
+                    <span class="tx-type-badge ${tx.type === 'coinbase' ? 'badge-coinbase' : 'badge-normal'}">
+                        ${tx.type === 'coinbase' ? '⛏ COINBASE' : '↔ TX'}
+                    </span>
+                    <span class="tx-amount-big">${tx.amount} coins</span>
+                </div>
+                <div class="tx-detail-body">
+                    <div class="tx-flow">
+                        <span class="tx-addr-label">De:</span>
+                        <span class="tx-addr monospace">${tx.from}</span>
+                    </div>
+                    <div class="tx-arrow-big">↓</div>
+                    <div class="tx-flow">
+                        <span class="tx-addr-label">Para:</span>
+                        <span class="tx-addr monospace">${tx.to}</span>
+                    </div>
+                </div>
+                <div class="tx-detail-footer">
+                    <span class="tx-id-label">TXID:</span>
+                    <span class="tx-id monospace">${tx.txid}</span>
+                </div>
+            </div>
+        `).join('');
+
+    } catch (e) {
+        document.getElementById('bd-tx-list').innerHTML =
+            `<div class="empty">Error al cargar: ${e.message}</div>`;
     }
+}
+
+function closeBlockDetail() {
+    const panel = document.getElementById('block-detail-panel');
+    if (panel) panel.classList.add('hidden');
 }
 
 // ──────────────────────────────────────────────────────────
@@ -85,42 +236,44 @@ function updateNodesTable(nodes, maxHeight) {
     }
 
     tbody.innerHTML = nodes.map(node => {
-        const online      = node.online;
-        const lag         = maxHeight - node.chain_height;
-        const inSync      = lag <= 2;
-        const miningMode  = node.mining_mode || '-';
+        const online     = node.online;
+        const lag        = maxHeight - node.chain_height;
+        const inSync     = lag <= 2;
+        const miningMode = node.mining_mode || '-';
 
-        const syncIcon  = !online      ? '⬛'
-                        : inSync       ? '✅'
-                        : lag <= 5     ? '⚠️'
-                        : '🔴';
+        const syncIcon = !online ? '⬛'
+                       : inSync  ? '✅'
+                       : lag <= 5 ? '⚠️'
+                       : '🔴';
 
-        const syncText  = !online      ? '-'
-                        : inSync       ? 'Sync'
-                        : `−${lag}`;
+        const syncText = !online ? '-'
+                       : inSync  ? 'Sync'
+                       : `−${lag}`;
 
         const modeLabel = miningMode === 'auto'   ? '⚙ Auto'
                         : miningMode === 'manual' ? '🖐 Manual'
                         : '-';
 
-        const rowClass  = !online      ? 'row-offline'
-                        : !inSync      ? 'row-desynced'
-                        : '';
-
-        const dashboardUrl = `http://${node.dashboard_port ? window.location.hostname : 'localhost'}:${node.dashboard_port}`;
+        const rowClass = !online ? 'row-offline'
+                       : !inSync ? 'row-desynced'
+                       : '';
 
         return `
             <tr class="${rowClass}">
                 <td class="node-id">${node.node_id || '-'}</td>
-                <td>${online ? '<span class="dot green">●</span> Online' : '<span class="dot red">●</span> Offline'}</td>
+                <td>${online
+                    ? '<span class="dot green">●</span> Online'
+                    : '<span class="dot red">●</span> Offline'}</td>
                 <td class="monospace">${online ? node.chain_height : '-'}</td>
-                <td>${syncIcon} <span class="sync-text ${inSync ? 'sync-ok' : 'sync-lag'}">${syncText}</span></td>
+                <td>${syncIcon} <span class="${inSync ? 'sync-ok' : 'sync-lag'}">${syncText}</span></td>
                 <td class="balance">${online ? node.balance.toFixed(2) : '-'}</td>
                 <td>${online ? node.peers_count : '-'}</td>
                 <td>${online ? node.mempool_count : '-'}</td>
                 <td>${online ? modeLabel : '-'}</td>
                 <td>${online ? node.blocks_mined : '-'}</td>
-                <td>${online ? `<a href="${dashboardUrl}" target="_blank" class="link">:${node.dashboard_port}</a>` : '-'}</td>
+                <td>${online
+                    ? `<a href="http://${window.location.hostname}:${node.dashboard_port}" target="_blank" class="link">:${node.dashboard_port}</a>`
+                    : '-'}</td>
             </tr>
         `;
     }).join('');
@@ -139,8 +292,8 @@ function updateOrchestrator(orch) {
 
     const modeEl = document.getElementById('orch-mode');
     if (modeEl) {
-        modeEl.textContent  = labels[mode] || mode;
-        modeEl.style.color  = colors[mode] || '#333';
+        modeEl.textContent    = labels[mode] || mode;
+        modeEl.style.color    = colors[mode] || '#333';
         modeEl.style.fontWeight = '600';
     }
 
@@ -158,7 +311,7 @@ function updateOrchestrator(orch) {
 async function setOrchMode(mode) {
     try {
         await fetch(`/api/orchestrator/${mode}`, { method: 'POST' });
-        await updateNetwork();
+        await updateAll();
         showNotification(`TXs automáticas: ${mode === 'auto' ? 'activadas' : 'pausadas'}`);
     } catch (e) {
         console.error('Error cambiando modo orquestador:', e);
@@ -174,6 +327,11 @@ function setText(id, value) {
     if (el) el.textContent = value;
 }
 
+function formatTime(timestamp) {
+    if (!timestamp) return '-';
+    return new Date(timestamp * 1000).toLocaleTimeString();
+}
+
 function showNotification(msg) {
     const el = document.getElementById('notification');
     if (!el) return;
@@ -187,6 +345,11 @@ function showNotification(msg) {
 // ──────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-    updateNetwork();
-    setInterval(updateNetwork, 3000);
+    // Red y resumen: cada 3 segundos
+    updateAll();
+    setInterval(updateAll, 3000);
+
+    // Cadena visual: cada 5 segundos (menos frecuente)
+    updateChain();
+    setInterval(updateChain, 5000);
 });
