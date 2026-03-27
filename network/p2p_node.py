@@ -103,6 +103,9 @@ class P2PNode:
         self.blocks_mined:   int   = 0
         self.mining_rewards: float = 0.0
 
+        # Progreso del PoW en curso (leído desde Flask sin lock — GIL suficiente)
+        self.mining_progress: dict = {'active': False, 'attempts': 0, 'hashrate': 0.0}
+
         self.logger = setup_logger(self.id)
         self.dashboard_port = 8000  # sobreescrito por el launcher
 
@@ -219,14 +222,27 @@ class P2PNode:
             )
 
             try:
+                # Callback que actualiza mining_progress desde el executor thread
+                def _on_progress(attempts, hashrate):
+                    self.mining_progress = {
+                        'active':   True,
+                        'attempts': attempts,
+                        'hashrate': hashrate,
+                    }
+
                 # Minar en thread separado — no bloquea asyncio
                 loop  = asyncio.get_running_loop()
                 block = await loop.run_in_executor(
                     None,
-                    self.blockchain.mine_block_cancellable,
-                    self.wallet.address,
-                    self._stop_mining_event,
+                    lambda: self.blockchain.mine_block_cancellable(
+                        self.wallet.address,
+                        self._stop_mining_event,
+                        progress_callback=_on_progress,
+                    )
                 )
+
+                # Limpiar progreso al terminar (bloque encontrado o cancelado)
+                self.mining_progress = {'active': False, 'attempts': 0, 'hashrate': 0.0}
 
                 if block is not None:
                     # ¡Bloque encontrado! Actualizar stats y propagar
@@ -265,13 +281,24 @@ class P2PNode:
         self._stop_mining_event.clear()
 
         try:
+            def _on_progress(attempts, hashrate):
+                self.mining_progress = {
+                    'active':   True,
+                    'attempts': attempts,
+                    'hashrate': hashrate,
+                }
+
             loop  = asyncio.get_running_loop()
             block = await loop.run_in_executor(
                 None,
-                self.blockchain.mine_block_cancellable,
-                self.wallet.address,
-                self._stop_mining_event,
+                lambda: self.blockchain.mine_block_cancellable(
+                    self.wallet.address,
+                    self._stop_mining_event,
+                    progress_callback=_on_progress,
+                )
             )
+
+            self.mining_progress = {'active': False, 'attempts': 0, 'hashrate': 0.0}
 
             if block is not None:
                 self.blocks_mined   += 1

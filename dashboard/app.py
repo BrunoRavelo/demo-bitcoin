@@ -53,16 +53,17 @@ class NodeDashboard:
         @self.app.route('/api/status')
         def api_status():
             return jsonify({
-                'node_id':        self.node.id,
-                'address':        self.node.wallet.address,
-                'balance':        self.node.get_balance(),
-                'chain_height':   self.node.blockchain.get_height(),
-                'mempool_count':  len(self.node.blockchain.mempool),
-                'peers_count':    len(self.node.peers_connected),
-                'mining_mode':    self.node.mining_mode,
-                'blocks_mined':   self.node.blocks_mined,
-                'mining_rewards': self.node.mining_rewards,
-                'dashboard_mode': self.dashboard_mode,
+                'node_id':         self.node.id,
+                'address':         self.node.wallet.address,
+                'balance':         self.node.get_balance(),
+                'chain_height':    self.node.blockchain.get_height(),
+                'mempool_count':   len(self.node.blockchain.mempool),
+                'peers_count':     len(self.node.peers_connected),
+                'mining_mode':     self.node.mining_mode,
+                'blocks_mined':    self.node.blocks_mined,
+                'mining_rewards':  self.node.mining_rewards,
+                'dashboard_mode':  self.dashboard_mode,
+                'mining_progress': self.node.mining_progress,
             })
 
         @self.app.route('/api/wallet')
@@ -109,7 +110,7 @@ class NodeDashboard:
                     'txs':        len(block.transactions),
                     'timestamp':  block.header.timestamp,
                     'nonce':      block.header.nonce,
-                    'difficulty': block.header.difficulty,
+                    'target':     block.header.difficulty_display,
                     'mined_by':   coinbase_to,
                 })
             return jsonify({
@@ -129,7 +130,7 @@ class NodeDashboard:
                 'merkle_root': block.header.merkle_root[:16] + '...',
                 'timestamp':   block.header.timestamp,
                 'nonce':       block.header.nonce,
-                'difficulty':  block.header.difficulty,
+                'target':      block.header.difficulty_display,
                 'txs': [
                     {
                         'txid':   tx.short_hash(),

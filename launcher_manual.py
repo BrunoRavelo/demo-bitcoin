@@ -27,7 +27,7 @@ import threading
 from core.blockchain import Blockchain
 from network.p2p_node import P2PNode, MINING_MANUAL
 from dashboard.app import NodeDashboard
-from config import DIFFICULTY
+
 
 
 def build_config(num_nodes: int) -> list:
@@ -54,8 +54,7 @@ async def start_node_with_dashboard(config: dict):
     Sin bloque inicial — todos arrancan con solo el genesis (balance 0).
     El usuario mina manualmente desde el dashboard para obtener balance.
     """
-    blockchain            = Blockchain()
-    blockchain.DIFFICULTY = DIFFICULTY
+    blockchain = Blockchain()
 
     node = P2PNode(
         host='localhost',
@@ -87,7 +86,6 @@ async def main(num_nodes: int = 5):
 
   Modo:       MANUAL (minado y TXs controlados por el usuario)
   Nodos:      {num_nodes}
-  Difficulty: {DIFFICULTY}
   Balance inicial: 0 coins (mina tu primer bloque para obtener {50} coins)
 
   Puertos P2P:       5000 – {5000 + num_nodes - 1}

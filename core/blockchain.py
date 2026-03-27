@@ -160,6 +160,7 @@ class Blockchain:
         self,
         miner_address: str,
         stop_event:    Optional[threading.Event] = None,
+        progress_callback = None,
     ) -> Optional[Block]:
         """
         Mina un bloque con soporte de cancelación.
@@ -194,7 +195,7 @@ class Blockchain:
         )
 
         pow_solver = ProofOfWork(header, self.CURRENT_TARGET)
-        nonce      = pow_solver.mine(stop_event=stop_event)
+        nonce      = pow_solver.mine(stop_event=stop_event, progress_callback=progress_callback)
 
         if nonce is None:
             print("[MINING] Minado cancelado — bloque externo recibido\n")

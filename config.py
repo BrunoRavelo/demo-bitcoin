@@ -34,9 +34,9 @@ CLEANUP_INTERVAL = 60   # segundos entre limpiezas
 MAX_TARGET = 2**256 - 1
 
 # Target inicial calibrado para ~180s por bloque a 50,000 h/s:
-#   50,000 h/s × 180s = 9,000,000 hashes esperados
-#   INITIAL_TARGET = MAX_TARGET // 9_000_000
-INITIAL_TARGET = MAX_TARGET // 9_000_000
+#   50,000 h/s × 30s = 1,500,000 hashes esperados
+#   INITIAL_TARGET = MAX_TARGET // 1_500_000
+INITIAL_TARGET = MAX_TARGET // 1_500_000
 
 # Tiempo objetivo por bloque en segundos
 TARGET_BLOCK_TIME = 180  # 3 minutos

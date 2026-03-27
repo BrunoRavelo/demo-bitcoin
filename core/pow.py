@@ -43,18 +43,24 @@ class ProofOfWork:
         self.header = header
         self.target = target
 
-    def mine(self, stop_event: Optional[threading.Event] = None) -> Optional[int]:
+    def mine(
+        self,
+        stop_event        = None,
+        progress_callback = None,
+    ) -> Optional[int]:
         """
         Busca el nonce válido incrementando desde 0.
 
         Args:
-            stop_event: threading.Event para cancelar el minado.
-                        Si se activa, retorna None limpiamente.
+            stop_event:        threading.Event para cancelar el minado.
+                               Si se activa, retorna None limpiamente.
+            progress_callback: Callable(attempts: int, hashrate: float).
+                               Se invoca cada 10,000 intentos para que
+                               el dashboard muestre progreso real.
 
         Returns:
             Nonce válido, o None si fue cancelado.
         """
-        # Cancelación inmediata si el evento ya está activo
         if stop_event is not None and stop_event.is_set():
             return None
 
@@ -63,7 +69,6 @@ class ProofOfWork:
         log_every  = 10_000
 
         while True:
-            # Verificar cancelación periódicamente
             if stop_event is not None and nonce % 1000 == 0:
                 if stop_event.is_set():
                     elapsed = time.time() - start_time
@@ -88,11 +93,13 @@ class ProofOfWork:
                 )
                 return nonce
 
-            # Log de progreso
+            # Reporte de progreso cada 10,000 intentos
             if nonce > 0 and nonce % log_every == 0:
                 elapsed  = time.time() - start_time
                 hashrate = nonce / elapsed if elapsed > 0 else 0
                 print(f"[POW] {nonce:,} intentos ({hashrate:,.0f} h/s)...")
+                if progress_callback is not None:
+                    progress_callback(nonce, hashrate)
 
             nonce += 1
 

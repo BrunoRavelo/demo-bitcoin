@@ -9,7 +9,7 @@ import asyncio
 import argparse
 from core.blockchain import Blockchain
 from network.p2p_node import P2PNode
-from config import P2P_PORT, DASHBOARD_PORT, DIFFICULTY
+from config import P2P_PORT, DASHBOARD_PORT
 
 
 async def main():
@@ -80,7 +80,6 @@ async def main():
   P2P:        ws://{node.host}:{node.port}
   Dashboard:  {dashboard_url}
   Wallet:     {node.wallet.address}
-  Difficulty: {DIFFICULTY}
 
   Bootstrap peers: {len(bootstrap_peers)}
   Presiona Ctrl+C para detener

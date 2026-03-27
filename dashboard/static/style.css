@@ -268,6 +268,38 @@ body {
     50%       { opacity: 0.4; transform: scale(0.8); }
 }
 
+/* ── Progreso de minado ────────────────────────────────── */
+
+.mining-progress-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 12px;
+    padding: 8px 12px;
+    background: #f0f7ff;
+    border: 1px solid #cce0ff;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: #1a4a8a;
+    font-family: monospace;
+}
+.mining-progress-row.hidden { display: none; }
+
+.pow-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #1976d2;
+    animation: pow-blink 1s ease-in-out infinite;
+    flex-shrink: 0;
+}
+
+@keyframes pow-blink {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.2; }
+}
+
 /* ── Lista de bloques ────────────────────────────────────── */
 
 .blocks-list {

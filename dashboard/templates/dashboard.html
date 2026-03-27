@@ -136,6 +136,14 @@
                 </div>
                 {% endif %}
             </div>
+
+            <!-- Progreso del PoW (visible en AUTO y MANUAL mientras mina) -->
+            <div id="mining-progress-row" class="mining-progress-row hidden">
+                <span class="pow-dot"></span>
+                <span id="pow-attempts">0</span> intentos
+                &nbsp;·&nbsp;
+                <span id="pow-hashrate">0</span> h/s
+            </div>
         </div>
 
         <!-- ═══════════════════════════════════════════════════ -->

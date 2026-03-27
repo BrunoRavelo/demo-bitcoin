@@ -28,6 +28,9 @@ async function updateData() {
             updateTxStatus();
         }
 
+        // Progreso del PoW: visible en ambos modos mientras mina
+        updateMiningProgress(status);
+
     } catch (err) {
         console.error('Error actualizando dashboard:', err);
     }
@@ -89,6 +92,24 @@ function updateMining(status) {
     if (indicator) {
         indicator.classList.toggle('hidden', mode !== 'auto');
         if (mode === 'auto') setText('mining-height', status.chain_height || '-');
+    }
+}
+
+// ──────────────────────────────────────────────────────────
+// Progreso del PoW (ambos modos)
+// ──────────────────────────────────────────────────────────
+
+function updateMiningProgress(status) {
+    const progress    = status.mining_progress || {};
+    const progressRow = document.getElementById('mining-progress-row');
+    if (!progressRow) return;
+
+    if (progress.active) {
+        progressRow.classList.remove('hidden');
+        setText('pow-attempts', (progress.attempts || 0).toLocaleString('es-MX'));
+        setText('pow-hashrate', Math.round(progress.hashrate || 0).toLocaleString('es-MX'));
+    } else {
+        progressRow.classList.add('hidden');
     }
 }
 

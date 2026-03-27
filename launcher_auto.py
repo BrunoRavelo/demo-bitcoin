@@ -29,11 +29,11 @@ import argparse
 import threading
 from core.blockchain import Blockchain
 from core.tx_orchestrator import TxOrchestrator, ORCH_AUTO, ORCH_MANUAL
-from network.p2p_node import P2PNode, MINING_AUTO
+from network.p2p_node import P2PNode, MINING_AUTO, MINING_MANUAL
 from network.seed_node import SeedNode
 from dashboard.app import NodeDashboard
 from config import (
-    DIFFICULTY, SEED_PORT,
+    SEED_PORT,
     TX_AUTO_BASE_INTERVAL, TX_AUTO_JITTER,
 )
 
@@ -79,8 +79,7 @@ async def start_node_with_dashboard(config: dict, orchestrator=None):
         orchestrator: TxOrchestrator compartido (puede ser None al inicio
                       y asignarse después via dashboard.orchestrator = orch).
     """
-    blockchain            = Blockchain()
-    blockchain.DIFFICULTY = DIFFICULTY
+    blockchain = Blockchain()
 
     node = P2PNode(
         host='localhost',
@@ -89,7 +88,7 @@ async def start_node_with_dashboard(config: dict, orchestrator=None):
         blockchain=blockchain,
     )
 
-    node.mining_mode = MINING_AUTO
+    node.mining_mode = MINING_MANUAL  # arranca pausado — activar desde el dashboard
     node.dashboard_port = config['dashboard_port']
 
     asyncio.create_task(node.start())
@@ -115,9 +114,8 @@ async def main(num_nodes: int = 5):
 ║              BLOCKCHAIN DEMO — Launcher Auto                         ║
 ╚══════════════════════════════════════════════════════════════════════╝
 
-  Modo:       AUTO (minado y TXs automáticos)
+  Modo:       Nodos arrancan en MANUAL — activa AUTO desde cada dashboard
   Nodos:      {num_nodes}
-  Difficulty: {DIFFICULTY}
   Seed port:  {LAUNCHER_SEED_PORT}
   TXs auto:   cada {TX_AUTO_BASE_INTERVAL}s ± {TX_AUTO_JITTER}s
 
