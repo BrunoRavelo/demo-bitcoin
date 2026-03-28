@@ -364,6 +364,16 @@ body {
 
 .orch-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 0; }
 
+.orch-stats-divider {
+    grid-column: 1 / -1;
+    height: 1px;
+    background: #e8e8e8;
+    margin: 8px 0;
+}
+
+.orch-failed-value { color: #c62828; font-weight: 600; }
+.orch-rate-value   { color: #1b5e20; font-weight: 600; }
+
 .orch-controls { display: flex; flex-direction: column; gap: 10px; min-width: 160px; }
 
 .btn-mode {

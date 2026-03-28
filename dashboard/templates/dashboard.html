@@ -5,6 +5,37 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ node_id }} - Dashboard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <style>
+        .mining-progress-row {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            margin-top: 12px;
+            padding: 8px 12px;
+            background: #f0f7ff;
+            border: 1px solid #cce0ff;
+            border-radius: 6px;
+            font-size: 0.9rem;
+            color: #1a4a8a;
+            font-family: monospace;
+        }
+        .mining-progress-row.hidden { display: none; }
+
+        /* Punto parpadeante que indica actividad real */
+        .pow-dot {
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #1976d2;
+            animation: pow-blink 1s ease-in-out infinite;
+            flex-shrink: 0;
+        }
+        @keyframes pow-blink {
+            0%, 100% { opacity: 1; }
+            50%       { opacity: 0.2; }
+        }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -13,9 +44,8 @@
         <div class="header">
             <h1>{{ node_id }}</h1>
             <div class="ports">
-                <span class="port-badge">P2P: {{ p2p_port }}</span>
-                <span class="port-badge">Dashboard: {{ dashboard_port }}</span>
                 <span class="port-badge" id="chain-badge">Altura: -</span>
+                <span class="port-badge" id="tx-mode-badge">TXs: -</span>
                 <span class="port-badge mode-badge">
                     {% if dashboard_mode == 'auto' %}⚙ Modo Auto{% else %}🖐 Modo Manual{% endif %}
                 </span>
@@ -108,36 +138,33 @@
                 </div>
             </div>
 
-            {% if dashboard_mode == 'auto' %}
-            <!-- Controles AUTO/MANUAL solo en modo auto -->
+            <!-- Modo actual + controles AUTO/MANUAL (siempre visibles) -->
             <div class="info-item" style="margin-bottom:15px;">
-                <span class="label">Modo actual:</span>
+                <span class="label">Modo de minado:</span>
                 <span class="value" id="mining-mode-label">-</span>
             </div>
             <div class="mining-controls" style="margin-bottom:15px;">
                 <button onclick="setMiningMode('auto')"   class="btn-mode" id="btn-auto">AUTO</button>
                 <button onclick="setMiningMode('manual')" class="btn-mode" id="btn-manual">MANUAL</button>
             </div>
-            {% endif %}
 
-            <!-- Botón minar ahora: siempre visible -->
+            <!-- Botón minar: solo visible en modo MANUAL -->
             <div id="mine-once-section">
                 <button onclick="mineOnce()" class="btn-primary" id="btn-mine-once">
                     ⛏ Minar un bloque ahora
                 </button>
-                {% if dashboard_mode == 'manual' %}
                 <p class="hint" style="margin-top:8px;">
                     Mina un bloque para confirmar TXs del mempool y recibir 50 coins.
                 </p>
-                {% else %}
-                <div id="mining-indicator" class="mining-indicator hidden">
-                    <span class="dot-pulse"></span>
-                    Minando bloque #<span id="mining-height">-</span>...
-                </div>
-                {% endif %}
             </div>
 
-            <!-- Progreso del PoW (visible en AUTO y MANUAL mientras mina) -->
+            <!-- Indicador de minando (modo AUTO activo) -->
+            <div id="mining-indicator" class="mining-indicator hidden">
+                <span class="dot-pulse"></span>
+                Minando bloque #<span id="mining-height">-</span>...
+            </div>
+
+            <!-- Progreso del PoW (visible mientras mina) -->
             <div id="mining-progress-row" class="mining-progress-row hidden">
                 <span class="pow-dot"></span>
                 <span id="pow-attempts">0</span> intentos

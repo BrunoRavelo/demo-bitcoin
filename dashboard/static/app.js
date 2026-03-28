@@ -20,16 +20,14 @@ async function updateData() {
         updatePeers(peers);
         updateMempool(mempool);
         updateHeader(status, chain);
+        updateMining(status);
+        updateMiningProgress(status);
+        updateTxBadge(status);
 
         // Secciones exclusivas del modo auto
         if (DASHBOARD_MODE === 'auto') {
-            updateMining(status);
             updateAddressDropdown();
-            updateTxStatus();
         }
-
-        // Progreso del PoW: visible en ambos modos mientras mina
-        updateMiningProgress(status);
 
     } catch (err) {
         console.error('Error actualizando dashboard:', err);
@@ -55,7 +53,7 @@ function updateHeader(status, chain) {
 }
 
 // ──────────────────────────────────────────────────────────
-// Minero (solo modo auto)
+// Minero (siempre activo)
 // ──────────────────────────────────────────────────────────
 
 function updateMining(status) {
@@ -63,16 +61,18 @@ function updateMining(status) {
     const labels = { auto: '⚙ Automático', manual: '🖐 Manual' };
     const colors = { auto: '#2e7d32',       manual: '#1565c0'   };
 
-    const label = document.getElementById('mining-mode-label');
-    if (label) {
-        label.textContent = labels[mode] || mode;
-        label.style.color = colors[mode] || '#333';
-        label.style.fontWeight = '600';
-    }
-
-    setText('blocks-mined',   status.blocks_mined   || 0);
+    // Stats — siempre actualizados independientemente del modo
+    setText('blocks-mined',   status.blocks_mined   ?? 0);
     setText('mining-rewards', status.mining_rewards != null
         ? status.mining_rewards.toFixed(2) : '0.00');
+
+    // Etiqueta de modo
+    const label = document.getElementById('mining-mode-label');
+    if (label) {
+        label.textContent  = labels[mode] || mode;
+        label.style.color  = colors[mode] || '#333';
+        label.style.fontWeight = '600';
+    }
 
     // Resaltar botón activo
     ['auto', 'manual'].forEach(m => {
@@ -80,14 +80,11 @@ function updateMining(status) {
         if (btn) btn.classList.toggle('active', m === mode);
     });
 
-    // Botón "minar ahora": en modo auto solo en MANUAL,
-    // en modo manual siempre visible (no hay toggle)
-    if (DASHBOARD_MODE === 'auto') {
-        const section = document.getElementById('mine-once-section');
-        if (section) section.style.display = mode === 'manual' ? 'block' : 'none';
-    }
+    // Botón minar: visible solo en modo MANUAL
+    const mineSection = document.getElementById('mine-once-section');
+    if (mineSection) mineSection.style.display = mode === 'manual' ? 'block' : 'none';
 
-    // Indicador de minando solo en AUTO
+    // Indicador "Minando...": visible solo en modo AUTO
     const indicator = document.getElementById('mining-indicator');
     if (indicator) {
         indicator.classList.toggle('hidden', mode !== 'auto');
@@ -106,8 +103,8 @@ function updateMiningProgress(status) {
 
     if (progress.active) {
         progressRow.classList.remove('hidden');
-        setText('pow-attempts', (progress.attempts || 0).toLocaleString('es-MX'));
-        setText('pow-hashrate', Math.round(progress.hashrate || 0).toLocaleString('es-MX'));
+        setText('pow-attempts', (progress.attempts || 0).toLocaleString());
+        setText('pow-hashrate', Math.round(progress.hashrate || 0).toLocaleString());
     } else {
         progressRow.classList.add('hidden');
     }
@@ -154,6 +151,25 @@ function updateTxModeUI(mode) {
         const btn = document.getElementById(`btn-tx-${m}`);
         if (btn) btn.classList.toggle('active', m === mode);
     });
+}
+
+// Actualiza el badge de TXs en el header (siempre, ambos modos)
+async function updateTxBadge(status) {
+    try {
+        const res  = await fetch('/api/tx/status');
+        const data = await res.json();
+        const badge = document.getElementById('tx-mode-badge');
+        if (!badge) return;
+        if (!data.available) {
+            badge.textContent = 'TXs: Manuales';
+            badge.style.background = '#e3f2fd';
+        } else {
+            const isAuto = data.tx_mode === 'auto';
+            badge.textContent  = isAuto ? 'TXs: ⚙ Auto' : 'TXs: 🖐 Manual';
+            badge.style.background = isAuto ? '#e8f5e9' : '#e3f2fd';
+            if (DASHBOARD_MODE === 'auto') updateTxModeUI(data.tx_mode);
+        }
+    } catch (e) { /* seed no disponible */ }
 }
 
 // ──────────────────────────────────────────────────────────

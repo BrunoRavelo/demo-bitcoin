@@ -223,7 +223,7 @@ class GlobalDashboard:
         url            = f"http://{host}:{dashboard_port}/api/status"
 
         try:
-            response = requests.get(url, timeout=2)
+            response = requests.get(url, timeout=5)
             if response.status_code == 200:
                 data = response.json()
                 data['online']         = True
@@ -267,7 +267,7 @@ class GlobalDashboard:
             try:
                 r = requests.get(
                     f"http://{host}:{dashboard_port}/api/status",
-                    timeout=2
+                    timeout=5
                 )
                 if r.status_code == 200:
                     height = r.json().get('chain_height', 0)
@@ -291,7 +291,7 @@ class GlobalDashboard:
             'in_sync':       len(in_sync),
             'out_of_sync':   len(out_sync),
             'max_height':    max_height,
-            'total_mempool': sum(n.get('mempool_count', 0) for n in online),
+            'total_mempool': max((n.get('mempool_count', 0) for n in online), default=0),
             'total_mined':   sum(n.get('blocks_mined', 0) for n in online),
             'total_rewards': sum(n.get('mining_rewards', 0.0) for n in online),
             'mining_auto':   sum(1 for n in online if n.get('mining_mode') == 'auto'),

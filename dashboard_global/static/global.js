@@ -4,23 +4,17 @@
 let lastMaxHeight = 0;
 let chainRefreshInterval = null;
 
-// ──────────────────────────────────────────────────────────
-// Loop principal — red + cadena en paralelo
-// ──────────────────────────────────────────────────────────
-
 async function updateAll() {
     try {
         const [network, orch] = await Promise.all([
             fetch('/api/network').then(r => r.json()),
             fetch('/api/orchestrator').then(r => r.json()),
         ]);
-
         updateSeedBadge(network.seed_online);
         updateSummary(network.summary);
         updateNodesTable(network.nodes, network.summary.max_height);
         updateOrchestrator(orch);
         updateRefreshBadge();
-
     } catch (err) {
         console.error('Error actualizando red:', err);
         document.getElementById('refresh-badge').textContent = '⚠ Error de conexión';
@@ -40,10 +34,6 @@ async function updateChain() {
         console.error('Error cargando cadena:', err);
     }
 }
-
-// ──────────────────────────────────────────────────────────
-// Resumen de red
-// ──────────────────────────────────────────────────────────
 
 function updateSeedBadge(online) {
     const el = document.getElementById('seed-badge');
@@ -70,7 +60,7 @@ function updateSummary(s) {
 
     if (lastMaxHeight > 0 && s.max_height > lastMaxHeight) {
         showNotification(`¡Nuevo bloque #${s.max_height - 1} confirmado en la red!`);
-        updateChain(); // Actualizar cadena cuando hay bloque nuevo
+        updateChain();
     }
     lastMaxHeight = s.max_height;
 
@@ -78,29 +68,19 @@ function updateSummary(s) {
     if (outCard) outCard.style.background = s.out_of_sync > 0 ? '#fff3e0' : '';
 }
 
-// ──────────────────────────────────────────────────────────
-// Vista gráfica de la cadena
-// ──────────────────────────────────────────────────────────
-
 function renderChainVisual(blocks, totalHeight) {
     const container = document.getElementById('chain-visual');
     if (!container) return;
-
-    // blocks viene en orden descendente (más reciente primero)
-    // Para la vista visual queremos de izquierda a derecha: más antiguo → más reciente
     const ordered = [...blocks].reverse();
-
     const items = ordered.map((b, i) => {
-        const isLatest   = i === ordered.length - 1;
-        const isGenesis  = b.height === 0;
-        const txLabel    = b.txs === 1 ? '1 TX' : `${b.txs} TXs`;
+        const isLatest  = i === ordered.length - 1;
+        const isGenesis = b.height === 0;
+        const txLabel   = b.txs === 1 ? '1 TX' : `${b.txs} TXs`;
         const minerShort = b.mined_by ? b.mined_by.slice(0, 8) + '...' : 'génesis';
-
         return `
             ${i > 0 ? '<div class="chain-arrow">→</div>' : ''}
             <div class="chain-block ${isLatest ? 'chain-block-latest' : ''} ${isGenesis ? 'chain-block-genesis' : ''}"
-                 onclick="showBlockDetail('${b.full_hash}')"
-                 title="Click para ver detalle">
+                 onclick="showBlockDetail('${b.full_hash}')" title="Click para ver detalle">
                 <div class="cb-height">#${b.height}</div>
                 <div class="cb-hash monospace">${b.hash}</div>
                 <div class="cb-meta">
@@ -108,31 +88,19 @@ function renderChainVisual(blocks, totalHeight) {
                     <span class="cb-miner">⛏ ${minerShort}</span>
                 </div>
                 <div class="cb-time">${formatTime(b.timestamp)}</div>
-            </div>
-        `;
+            </div>`;
     }).join('');
-
-    // Si hay más bloques que los mostrados, agregar indicador al inicio
     const hiddenCount = totalHeight - blocks.length;
     const prefix = hiddenCount > 0
-        ? `<div class="chain-ellipsis">... ${hiddenCount} bloques anteriores</div>
-           <div class="chain-arrow">→</div>`
+        ? `<div class="chain-ellipsis">... ${hiddenCount} bloques anteriores</div><div class="chain-arrow">→</div>`
         : '';
-
     container.innerHTML = prefix + items;
-
-    // Hacer scroll al bloque más reciente
     container.scrollLeft = container.scrollWidth;
 }
-
-// ──────────────────────────────────────────────────────────
-// Info del último bloque
-// ──────────────────────────────────────────────────────────
 
 function updateLatestBlockInfo(block) {
     const panel = document.getElementById('latest-block-info');
     if (!panel) return;
-
     panel.style.display = 'block';
     setText('lb-height', `#${block.height}`);
     setText('lb-hash',   block.full_hash || block.hash);
@@ -142,49 +110,33 @@ function updateLatestBlockInfo(block) {
     setText('lb-time',   formatTime(block.timestamp));
 }
 
-// ──────────────────────────────────────────────────────────
-// Panel de detalle de bloque
-// ──────────────────────────────────────────────────────────
-
 async function showBlockDetail(fullHash) {
     const panel = document.getElementById('block-detail-panel');
     if (!panel) return;
-
-    // Mostrar panel con estado de carga
     panel.classList.remove('hidden');
     document.getElementById('bd-tx-list').innerHTML = '<div class="empty">Cargando...</div>';
     panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
     try {
         const block = await fetch(`/api/block/${fullHash}`).then(r => r.json());
-
         if (block.error) {
-            document.getElementById('bd-tx-list').innerHTML =
-                `<div class="empty">Error: ${block.error}</div>`;
+            document.getElementById('bd-tx-list').innerHTML = `<div class="empty">Error: ${block.error}</div>`;
             return;
         }
-
-        // Meta del bloque
         const heightEl = document.getElementById('bd-height');
         if (heightEl) heightEl.textContent = `#${block.height ?? ''}`;
-
         setText('bd-hash',       block.hash);
         setText('bd-prev-hash',  block.prev_hash);
         setText('bd-merkle',     block.merkle_root);
         setText('bd-nonce',      (block.nonce || 0).toLocaleString());
-        setText('bd-difficulty', block.difficulty);
+        setText('bd-target',     block.target || block.difficulty || '-');
         setText('bd-timestamp',  block.timestamp ? new Date(block.timestamp * 1000).toLocaleString() : '-');
-
         const countEl = document.getElementById('bd-tx-count');
         if (countEl) countEl.textContent = `${block.tx_count} TX${block.tx_count !== 1 ? 's' : ''}`;
-
-        // Lista de transacciones
         const txList = document.getElementById('bd-tx-list');
         if (!block.txs || block.txs.length === 0) {
             txList.innerHTML = '<div class="empty">Sin transacciones</div>';
             return;
         }
-
         txList.innerHTML = block.txs.map(tx => `
             <div class="tx-detail-item ${tx.type === 'coinbase' ? 'tx-coinbase' : ''}">
                 <div class="tx-detail-header">
@@ -208,12 +160,9 @@ async function showBlockDetail(fullHash) {
                     <span class="tx-id-label">TXID:</span>
                     <span class="tx-id monospace">${tx.txid}</span>
                 </div>
-            </div>
-        `).join('');
-
+            </div>`).join('');
     } catch (e) {
-        document.getElementById('bd-tx-list').innerHTML =
-            `<div class="empty">Error al cargar: ${e.message}</div>`;
+        document.getElementById('bd-tx-list').innerHTML = `<div class="empty">Error al cargar: ${e.message}</div>`;
     }
 }
 
@@ -222,48 +171,26 @@ function closeBlockDetail() {
     if (panel) panel.classList.add('hidden');
 }
 
-// ──────────────────────────────────────────────────────────
-// Tabla de nodos
-// ──────────────────────────────────────────────────────────
-
 function updateNodesTable(nodes, maxHeight) {
     const tbody = document.getElementById('nodes-tbody');
     if (!tbody) return;
-
     if (!nodes || nodes.length === 0) {
         tbody.innerHTML = '<tr><td colspan="10" class="empty">Sin nodos registrados en el seed</td></tr>';
         return;
     }
-
     tbody.innerHTML = nodes.map(node => {
         const online     = node.online;
         const lag        = maxHeight - node.chain_height;
         const inSync     = lag <= 2;
         const miningMode = node.mining_mode || '-';
-
-        const syncIcon = !online ? '⬛'
-                       : inSync  ? '✅'
-                       : lag <= 5 ? '⚠️'
-                       : '🔴';
-
-        const syncText = !online ? '-'
-                       : inSync  ? 'Sync'
-                       : `−${lag}`;
-
-        const modeLabel = miningMode === 'auto'   ? '⚙ Auto'
-                        : miningMode === 'manual' ? '🖐 Manual'
-                        : '-';
-
-        const rowClass = !online ? 'row-offline'
-                       : !inSync ? 'row-desynced'
-                       : '';
-
+        const syncIcon = !online ? '⬛' : inSync ? '✅' : lag <= 5 ? '⚠️' : '🔴';
+        const syncText = !online ? '-' : inSync ? 'Sync' : `−${lag}`;
+        const modeLabel = miningMode === 'auto' ? '⚙ Auto' : miningMode === 'manual' ? '🖐 Manual' : '-';
+        const rowClass  = !online ? 'row-offline' : !inSync ? 'row-desynced' : '';
         return `
             <tr class="${rowClass}">
                 <td class="node-id">${node.node_id || '-'}</td>
-                <td>${online
-                    ? '<span class="dot green">●</span> Online'
-                    : '<span class="dot red">●</span> Offline'}</td>
+                <td>${online ? '<span class="dot green">●</span> Online' : '<span class="dot red">●</span> Offline'}</td>
                 <td class="monospace">${online ? node.chain_height : '-'}</td>
                 <td>${syncIcon} <span class="${inSync ? 'sync-ok' : 'sync-lag'}">${syncText}</span></td>
                 <td class="balance">${online ? node.balance.toFixed(2) : '-'}</td>
@@ -271,37 +198,25 @@ function updateNodesTable(nodes, maxHeight) {
                 <td>${online ? node.mempool_count : '-'}</td>
                 <td>${online ? modeLabel : '-'}</td>
                 <td>${online ? node.blocks_mined : '-'}</td>
-                <td>${online
-                    ? `<a href="http://${window.location.hostname}:${node.dashboard_port}" target="_blank" class="link">:${node.dashboard_port}</a>`
-                    : '-'}</td>
-            </tr>
-        `;
+                <td>${online ? `<a href="http://${window.location.hostname}:${node.dashboard_port}" target="_blank" class="link">:${node.dashboard_port}</a>` : '-'}</td>
+            </tr>`;
     }).join('');
 }
 
-// ──────────────────────────────────────────────────────────
-// Orquestador
-// ──────────────────────────────────────────────────────────
-
 function updateOrchestrator(orch) {
     if (!orch || !orch.available) return;
-
     const mode   = orch.mode || 'manual';
     const labels = { auto: '⚙ Automático', manual: '🖐 Manual' };
     const colors = { auto: '#2e7d32', manual: '#1565c0' };
-
     const modeEl = document.getElementById('orch-mode');
     if (modeEl) {
-        modeEl.textContent    = labels[mode] || mode;
-        modeEl.style.color    = colors[mode] || '#333';
+        modeEl.textContent  = labels[mode] || mode;
+        modeEl.style.color  = colors[mode] || '#333';
         modeEl.style.fontWeight = '600';
     }
-
     setText('orch-sent',   orch.txs_sent   || 0);
     setText('orch-failed', orch.txs_failed || 0);
-    setText('orch-rate',   orch.success_rate != null
-        ? (orch.success_rate * 100).toFixed(1) + '%' : '-');
-
+    setText('orch-rate',   orch.success_rate != null ? (orch.success_rate * 100).toFixed(1) + '%' : '-');
     ['auto', 'manual'].forEach(m => {
         const btn = document.getElementById(`btn-orch-${m}`);
         if (btn) btn.classList.toggle('active', m === mode);
@@ -317,10 +232,6 @@ async function setOrchMode(mode) {
         console.error('Error cambiando modo orquestador:', e);
     }
 }
-
-// ──────────────────────────────────────────────────────────
-// Utilidades
-// ──────────────────────────────────────────────────────────
 
 function setText(id, value) {
     const el = document.getElementById(id);
@@ -340,16 +251,9 @@ function showNotification(msg) {
     setTimeout(() => el.classList.add('hidden'), 4000);
 }
 
-// ──────────────────────────────────────────────────────────
-// Inicialización
-// ──────────────────────────────────────────────────────────
-
 document.addEventListener('DOMContentLoaded', () => {
-    // Red y resumen: cada 3 segundos
     updateAll();
     setInterval(updateAll, 3000);
-
-    // Cadena visual: cada 5 segundos (menos frecuente)
     updateChain();
     setInterval(updateChain, 5000);
 });
