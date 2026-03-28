@@ -55,6 +55,7 @@ class P2PNode:
         port:            int,
         bootstrap_peers: list,
         blockchain:      Blockchain,
+        seed_host:       str = SEED_HOST,
     ):
         self.id   = f"node_{port}"
         self.host = host
@@ -85,7 +86,7 @@ class P2PNode:
             node_id=self.id,
             host=self.host,
             port=self.port,
-            seed_host=SEED_HOST,
+            seed_host=seed_host,
             seed_port=SEED_PORT,
         )
 

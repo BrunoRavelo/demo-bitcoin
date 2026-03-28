@@ -9,7 +9,7 @@ import asyncio
 import argparse
 from core.blockchain import Blockchain
 from network.p2p_node import P2PNode
-from config import P2P_PORT, DASHBOARD_PORT
+from config import P2P_PORT, DASHBOARD_PORT, DIFFICULTY
 
 
 async def main():
@@ -36,6 +36,10 @@ async def main():
         '--no-dashboard', action='store_true',
         help='Arrancar sin dashboard web'
     )
+    parser.add_argument(
+        '--seed-host', type=str, default=SEED_HOST,
+        help=f'IP del seed node (default: {SEED_HOST})'
+    )
     args = parser.parse_args()
 
     # Parsear bootstrap peers
@@ -56,6 +60,7 @@ async def main():
         port=args.port,
         bootstrap_peers=bootstrap_peers,
         blockchain=blockchain,
+        seed_host=args.seed_host,
     )
 
     # Arrancar dashboard en thread separado (opcional)
@@ -80,6 +85,7 @@ async def main():
   P2P:        ws://{node.host}:{node.port}
   Dashboard:  {dashboard_url}
   Wallet:     {node.wallet.address}
+  Difficulty: {DIFFICULTY}
 
   Bootstrap peers: {len(bootstrap_peers)}
   Presiona Ctrl+C para detener
