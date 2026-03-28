@@ -26,7 +26,7 @@ from core.tx_orchestrator import TxOrchestrator, ORCH_AUTO
 from dashboard_global.app import GlobalDashboard
 from config import SEED_HOST, SEED_PORT
 
-GLOBAL_DASHBOARD_PORT = 9000
+GLOBAL_DASHBOARD_PORT = 9001
 
 
 async def main(
