@@ -208,6 +208,16 @@ class GlobalDashboard:
             self.orchestrator.set_mode(ORCH_MANUAL)
             return jsonify({'status': 'ok', 'mode': ORCH_MANUAL})
 
+        # ── API: control de minado de toda la red ─────────────
+
+        @self.app.route('/api/mining/all/auto', methods=['POST'])
+        def api_mining_all_auto():
+            return jsonify(self._set_all_mining('auto'))
+
+        @self.app.route('/api/mining/all/manual', methods=['POST'])
+        def api_mining_all_manual():
+            return jsonify(self._set_all_mining('manual'))
+
     # ──────────────────────────────────────────────────────────
     # Helpers
     # ──────────────────────────────────────────────────────────
@@ -278,6 +288,38 @@ class GlobalDashboard:
                 continue
 
         return best
+
+    def _set_all_mining(self, mode: str) -> dict:
+        """Envía POST /api/mine/<mode> a todos los nodos en paralelo."""
+        addresses = self.seed_client.get_addresses()
+        ok = 0
+        failed = 0
+        threads = []
+        lock = __import__('threading').Lock()
+
+        def call_node(node_info):
+            nonlocal ok, failed
+            host  = node_info['host']
+            port  = node_info.get('dashboard_port', 8000)
+            try:
+                r = requests.post(f"http://{host}:{port}/api/mine/{mode}", timeout=3)
+                with lock:
+                    if r.status_code == 200:
+                        ok += 1
+                    else:
+                        failed += 1
+            except Exception:
+                with lock:
+                    failed += 1
+
+        for node_info in addresses:
+            t = __import__('threading').Thread(target=call_node, args=(node_info,))
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join(timeout=4)
+
+        return {'status': 'ok', 'mode': mode, 'nodes_ok': ok, 'nodes_failed': failed}
 
     def _build_summary(self, nodes: list, max_height: int) -> dict:
         online   = [n for n in nodes if n['online']]

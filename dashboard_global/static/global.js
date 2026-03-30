@@ -58,6 +58,22 @@ function updateSummary(s) {
     setText('s-mined',       s.total_mined);
     setText('s-mining-auto', s.mining_auto);
 
+    // Mining control section
+    setText('mining-auto-count', `${s.mining_auto} / ${s.online_nodes}`);
+    const statusEl = document.getElementById('mining-global-status');
+    if (statusEl) {
+        if (s.mining_auto === s.online_nodes && s.online_nodes > 0) {
+            statusEl.textContent = '⚙ Todos en AUTO';
+            statusEl.style.color = '#2e7d32';
+        } else if (s.mining_auto === 0) {
+            statusEl.textContent = '🖐 Todos en MANUAL';
+            statusEl.style.color = '#1565c0';
+        } else {
+            statusEl.textContent = '⚡ Mixto';
+            statusEl.style.color = '#e65100';
+        }
+    }
+
     if (lastMaxHeight > 0 && s.max_height > lastMaxHeight) {
         showNotification(`¡Nuevo bloque #${s.max_height - 1} confirmado en la red!`);
         updateChain();
@@ -174,22 +190,33 @@ function closeBlockDetail() {
 function updateNodesTable(nodes, maxHeight) {
     const tbody = document.getElementById('nodes-tbody');
     if (!tbody) return;
+
     if (!nodes || nodes.length === 0) {
         tbody.innerHTML = '<tr><td colspan="10" class="empty">Sin nodos registrados en el seed</td></tr>';
         return;
     }
+
+    // Fork detection: nodos online en max_height con distinto latest_hash
+    const atTop = nodes.filter(n => n.online && n.chain_height === maxHeight);
+    const hashes = new Set(atTop.map(n => n.latest_hash).filter(Boolean));
+    const hasFork = hashes.size > 1;
+
     tbody.innerHTML = nodes.map(node => {
         const online     = node.online;
         const lag        = maxHeight - node.chain_height;
         const inSync     = lag <= 2;
         const miningMode = node.mining_mode || '-';
+        const isFork     = hasFork && online && node.chain_height === maxHeight;
+
         const syncIcon = !online ? '⬛' : inSync ? '✅' : lag <= 5 ? '⚠️' : '🔴';
         const syncText = !online ? '-' : inSync ? 'Sync' : `−${lag}`;
         const modeLabel = miningMode === 'auto' ? '⚙ Auto' : miningMode === 'manual' ? '🖐 Manual' : '-';
-        const rowClass  = !online ? 'row-offline' : !inSync ? 'row-desynced' : '';
+        const forkBadge = isFork ? ' <span class="fork-badge">⚡ FORK</span>' : '';
+        const rowClass  = !online ? 'row-offline' : isFork ? 'row-fork' : !inSync ? 'row-desynced' : '';
+
         return `
             <tr class="${rowClass}">
-                <td class="node-id">${node.node_id || '-'}</td>
+                <td class="node-id">${node.node_id || '-'}${forkBadge}</td>
                 <td>${online ? '<span class="dot green">●</span> Online' : '<span class="dot red">●</span> Offline'}</td>
                 <td class="monospace">${online ? node.chain_height : '-'}</td>
                 <td>${syncIcon} <span class="${inSync ? 'sync-ok' : 'sync-lag'}">${syncText}</span></td>
@@ -201,6 +228,8 @@ function updateNodesTable(nodes, maxHeight) {
                 <td>${online ? `<a href="http://${window.location.hostname}:${node.dashboard_port}" target="_blank" class="link">:${node.dashboard_port}</a>` : '-'}</td>
             </tr>`;
     }).join('');
+
+    if (hasFork) showNotification('⚡ Fork detectado — dos nodos con distinto bloque en la misma altura');
 }
 
 function updateOrchestrator(orch) {
@@ -230,6 +259,18 @@ async function setOrchMode(mode) {
         showNotification(`TXs automáticas: ${mode === 'auto' ? 'activadas' : 'pausadas'}`);
     } catch (e) {
         console.error('Error cambiando modo orquestador:', e);
+    }
+}
+
+async function setAllMining(mode) {
+    try {
+        const res  = await fetch(`/api/mining/all/${mode}`, { method: 'POST' });
+        const data = await res.json();
+        const label = mode === 'auto' ? 'AUTO' : 'MANUAL';
+        showNotification(`Minado ${label} aplicado: ${data.nodes_ok} nodos OK, ${data.nodes_failed} fallidos`);
+        await updateAll();
+    } catch (e) {
+        console.error('Error cambiando modo de minado:', e);
     }
 }
 

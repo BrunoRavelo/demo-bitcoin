@@ -414,6 +414,20 @@ tbody td { padding: 11px 14px; vertical-align: middle; }
 .row-offline  { opacity: 0.5; }
 .row-desynced { background: #fff8e1; }
 .row-desynced:hover { background: #fff3cd; }
+.row-fork     { background: #fff3e0; }
+.row-fork:hover { background: #ffe0b2; }
+
+.fork-badge {
+    display: inline-block;
+    background: #ff6f00;
+    color: white;
+    font-size: 0.72em;
+    padding: 2px 7px;
+    border-radius: 10px;
+    margin-left: 6px;
+    font-weight: 700;
+    vertical-align: middle;
+}
 
 .node-id   { font-weight: 600; color: #1a1a2e; }
 .monospace { font-family: 'Courier New', monospace; }

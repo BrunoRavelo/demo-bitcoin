@@ -152,6 +152,29 @@
         </div>
 
         <!-- ═══════════════════════════════════════════════════ -->
+        <!-- CONTROL DE MINADO (toda la red)                    -->
+        <!-- ═══════════════════════════════════════════════════ -->
+        <div class="card">
+            <h2>Control de Minado — Toda la Red</h2>
+            <div class="orch-grid">
+                <div class="orch-stats">
+                    <div class="info-item">
+                        <span class="label">Minando en AUTO:</span>
+                        <span class="value" id="mining-auto-count">-</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">Estado:</span>
+                        <span class="value" id="mining-global-status">-</span>
+                    </div>
+                </div>
+                <div class="orch-controls">
+                    <button onclick="setAllMining('auto')"   class="btn-mode" id="btn-mine-all-auto">⚙ AUTO (todos)</button>
+                    <button onclick="setAllMining('manual')" class="btn-mode" id="btn-mine-all-manual">🖐 MANUAL (todos)</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════ -->
         <!-- CONTROL DEL ORQUESTADOR                            -->
         <!-- ═══════════════════════════════════════════════════ -->
         {% if has_orchestrator %}
