@@ -39,6 +39,9 @@ class Blockchain:
         self.MAX_MEMPOOL_SIZE = MAX_MEMPOOL_SIZE
         self.MAX_TXS_PER_BLOCK = MAX_TXS_PER_BLOCK
 
+        # Último ajuste de target — leído por el dashboard para notificación visual
+        self._last_adjustment = None  # {'block': int, 'ratio': float, 'direction': str, 'estimated': str}
+
         self.create_genesis_block()
 
     # ──────────────────────────────────────────────────────────
@@ -264,6 +267,13 @@ class Blockchain:
         self.CURRENT_TARGET = new_target
 
         ratio = actual_time / expected_time
+        direction = 'easier' if ratio < 1 else 'harder'
+        self._last_adjustment = {
+            'block':     height,
+            'ratio':     round(ratio, 2),
+            'direction': direction,
+            'estimated': self.get_estimated_block_time(),
+        }
         print(
             f"\n[DIFFICULTY] Ajuste en bloque #{height}\n"
             f"  Tiempo real:    {actual_time:.1f}s\n"

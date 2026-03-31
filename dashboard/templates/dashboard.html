@@ -85,16 +85,11 @@
                 <div class="form-group">
                     <label for="to_address">Destinatario:</label>
                     <div style="display:flex; gap:8px;">
-                        <input type="text"
-                            name="to_address"
-                            id="to_address"
-                            placeholder="1A2B3C4D5E6F..."
-                            required>
-                        {% if dashboard_mode == 'auto' %}
+                        <input type="text" name="to_address" id="to_address"
+                            placeholder="1A2B3C4D5E6F..." required>
                         <select id="address-select" onchange="fillAddress(this.value)" style="min-width:140px;">
                             <option value="">— conocidos —</option>
                         </select>
-                        {% endif %}
                     </div>
                     <small class="hint">Copia la address del nodo destinatario y pégala aquí</small>
                 </div>
@@ -103,7 +98,10 @@
                     <input type="number" name="amount" id="amount"
                            min="0.01" step="0.01" value="10" required>
                 </div>
-                <button type="submit" class="btn-primary">Enviar Transacción</button>
+                <div style="display:flex; gap:10px;">
+                    <button type="button" onclick="previewTx()" class="btn-secondary">🔍 Vista previa</button>
+                    <button type="submit" class="btn-primary" style="flex:1;">Enviar Transacción</button>
+                </div>
             </form>
 
             {% if dashboard_mode == 'auto' %}
@@ -223,5 +221,65 @@
         const DASHBOARD_MODE = '{{ dashboard_mode }}';
     </script>
     <script src="{{ url_for('static', filename='app.js') }}"></script>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- MODAL: Vista previa de TX                          -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div id="tx-preview-modal" class="modal-overlay hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>🔍 Vista Previa de Transacción</h3>
+                <button onclick="closeTxPreview()" class="btn-close-modal">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="verify-item">
+                    <span class="verify-label">De:</span>
+                    <span class="verify-value monospace small" id="prev-from">-</span>
+                </div>
+                <div class="verify-item">
+                    <span class="verify-label">Para:</span>
+                    <span class="verify-value monospace small" id="prev-to">-</span>
+                </div>
+                <div class="verify-item">
+                    <span class="verify-label">Cantidad:</span>
+                    <span class="verify-value" id="prev-amount">-</span>
+                </div>
+                <div class="verify-item">
+                    <span class="verify-label">Hash TX:</span>
+                    <span class="verify-value monospace small" id="prev-txid">-</span>
+                </div>
+                <div class="verify-item">
+                    <span class="verify-label">Firma Ed25519:</span>
+                    <span class="verify-value monospace small" id="prev-sig">-</span>
+                </div>
+                <div class="verify-item">
+                    <span class="verify-label">Firma válida:</span>
+                    <span class="verify-value" id="prev-valid">-</span>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeTxPreview()" class="btn-mode">Cancelar</button>
+                <button onclick="confirmTx()" class="btn-primary" style="flex:1;">✅ Confirmar y Enviar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════ -->
+    <!-- MODAL: Verificación de bloque                      -->
+    <!-- ═══════════════════════════════════════════════════ -->
+    <div id="verify-modal" class="modal-overlay hidden">
+        <div class="modal-box">
+            <div class="modal-header">
+                <h3>🔎 Verificación de Bloque <span id="verify-block-height"></span></h3>
+                <button onclick="closeVerifyModal()" class="btn-close-modal">✕</button>
+            </div>
+            <div class="modal-body" id="verify-results">
+                <div class="empty">Verificando...</div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeVerifyModal()" class="btn-primary">Cerrar</button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

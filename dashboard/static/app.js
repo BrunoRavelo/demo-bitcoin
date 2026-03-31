@@ -23,10 +23,12 @@ async function updateData() {
         updateMining(status);
         updateMiningProgress(status);
         updateTxBadge(status);
+        updateTargetNotification(status);
+        updateAddressDropdown();
 
-        // Secciones exclusivas del modo auto
+        // Controles TX: solo en modo auto
         if (DASHBOARD_MODE === 'auto') {
-            updateAddressDropdown();
+            // (updateAddressDropdown ya se llama arriba para ambos modos)
         }
 
     } catch (err) {
@@ -195,8 +197,8 @@ function updateChain(chain) {
     }
 
     list.innerHTML = chain.blocks.map(b => `
-        <div class="block-item" onclick="showBlockDetail('${b.full_hash}')">
-            <div class="block-header-row">
+        <div class="block-item">
+            <div class="block-header-row" onclick="showBlockDetail('${b.full_hash}')" style="cursor:pointer; flex:1;">
                 <span class="block-height">#${b.height}</span>
                 <span class="block-hash monospace">${b.hash}</span>
                 <span class="block-txs">${b.txs} TX${b.txs !== 1 ? 's' : ''}</span>
@@ -205,6 +207,8 @@ function updateChain(chain) {
                 <span>Nonce: ${b.nonce.toLocaleString()}</span>
                 <span>${b.mined_by ? 'Por: ' + b.mined_by : ''}</span>
                 <span>${formatTime(b.timestamp)}</span>
+                <button onclick="showVerifyModal('${b.full_hash}', ${b.height})"
+                        class="btn-verify">🔎 Verificar</button>
             </div>
         </div>
     `).join('');
@@ -214,11 +218,8 @@ async function showBlockDetail(fullHash) {
     try {
         const block = await fetch(`/api/block/${fullHash}`).then(r => r.json());
         if (block.error) return;
-        const info = `Bloque #\nHash: ${block.hash.slice(0,32)}...\nNonce: ${block.nonce}\nTXs: ${block.tx_count}\n\n` +
-            block.txs.map(tx =>
-                `${tx.type === 'coinbase' ? '[COINBASE]' : '[TX]'} ${tx.from} → ${tx.to}: ${tx.amount} coins`
-            ).join('\n');
-        alert(info);
+        // Show a quick summary notification instead of alert
+        showNotification(`Bloque #${block.nonce ? '' : ''} — Nonce: ${(block.nonce||0).toLocaleString()} · ${block.tx_count} TXs`);
     } catch (e) {
         console.error('Error obteniendo bloque:', e);
     }
@@ -300,6 +301,112 @@ async function mineOnce() {
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '⛏ Minar un bloque ahora'; }
     }
+}
+
+// ──────────────────────────────────────────────────────────
+// Notificación de ajuste de target
+// ──────────────────────────────────────────────────────────
+
+let lastSeenAdjustmentBlock = 0;
+
+function updateTargetNotification(status) {
+    const adj = status.target_info && status.target_info.adjustment;
+    if (!adj) return;
+    if (adj.block <= lastSeenAdjustmentBlock) return;
+    lastSeenAdjustmentBlock = adj.block;
+    const dir   = adj.direction === 'easier' ? '↑ más fácil' : '↓ más difícil';
+    const ratio = adj.ratio < 1
+        ? `${(1/adj.ratio).toFixed(1)}× más difícil`
+        : `${adj.ratio.toFixed(1)}× más fácil`;
+    showNotification(`🎯 Target ajustado en bloque #${adj.block} — ${ratio} — ${adj.estimated} por bloque`);
+}
+
+// ──────────────────────────────────────────────────────────
+// Modal: Vista previa de TX (firma)
+// ──────────────────────────────────────────────────────────
+
+async function previewTx() {
+    const toAddress = document.getElementById('to_address').value.trim();
+    const amount    = document.getElementById('amount').value;
+    if (!toAddress || !amount) {
+        showNotification('Completa destinatario y cantidad antes de la vista previa');
+        return;
+    }
+    try {
+        const res  = await fetch('/api/tx/preview', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ to_address: toAddress, amount: parseFloat(amount) }),
+        });
+        const data = await res.json();
+        if (data.error) { showNotification('Error: ' + data.error); return; }
+
+        setText('prev-from',   data.from);
+        setText('prev-to',     data.to);
+        setText('prev-amount', `${data.amount} coins`);
+        setText('prev-txid',   data.txid);
+        setText('prev-sig',    data.signature);
+        const validEl = document.getElementById('prev-valid');
+        if (validEl) {
+            validEl.textContent = data.valid ? '✅ Válida' : '❌ Inválida';
+            validEl.style.color = data.valid ? '#2e7d32' : '#c62828';
+        }
+        document.getElementById('tx-preview-modal').classList.remove('hidden');
+    } catch (e) {
+        showNotification('Error al generar vista previa');
+    }
+}
+
+function closeTxPreview() {
+    document.getElementById('tx-preview-modal').classList.add('hidden');
+}
+
+function confirmTx() {
+    closeTxPreview();
+    document.getElementById('tx-form').submit();
+}
+
+// ──────────────────────────────────────────────────────────
+// Modal: Verificación de bloque
+// ──────────────────────────────────────────────────────────
+
+async function showVerifyModal(fullHash, height) {
+    const modal = document.getElementById('verify-modal');
+    if (!modal) return;
+    setText('verify-block-height', `#${height}`);
+    document.getElementById('verify-results').innerHTML = '<div class="empty">Verificando...</div>';
+    modal.classList.remove('hidden');
+
+    try {
+        const data = await fetch(`/api/block/${fullHash}/verify`).then(r => r.json());
+        if (data.error) {
+            document.getElementById('verify-results').innerHTML = `<div class="empty">Error: ${data.error}</div>`;
+            return;
+        }
+
+        const checks = data.checks;
+        const rows   = Object.values(checks).map(c => `
+            <div class="check-row ${c.ok ? 'verify-result-ok' : 'verify-result-fail'}">
+                <span class="check-icon">${c.ok ? '✅' : '❌'}</span>
+                <div class="check-info">
+                    <div class="check-label">${c.label}</div>
+                    <div class="check-detail">${c.detail}</div>
+                </div>
+            </div>
+        `).join('');
+
+        const summary = data.all_valid
+            ? '<div class="verify-all-ok">✅ Bloque completamente válido</div>'
+            : '<div class="verify-all-fail">❌ Bloque con errores de validación</div>';
+
+        document.getElementById('verify-results').innerHTML = rows + summary;
+    } catch (e) {
+        document.getElementById('verify-results').innerHTML = `<div class="empty">Error: ${e.message}</div>`;
+    }
+}
+
+function closeVerifyModal() {
+    document.getElementById('verify-modal').classList.add('hidden');
 }
 
 // ──────────────────────────────────────────────────────────
