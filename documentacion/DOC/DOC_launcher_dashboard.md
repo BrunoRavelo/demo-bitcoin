@@ -1,10 +1,18 @@
 # Documentación Técnica: `launcher_dashboard.py`
 
+> **AVISO: Este documento describe una versión anterior del launcher.**
+> El archivo `launcher_dashboard.py` fue reemplazado por `launcher_manual.py` y `launcher_auto.py`
+> en el Sprint 10. La documentación actual de los launchers se encuentra en:
+> - [DOC_launcher_manual.md](DOC_launcher_manual.md) — Launcher con control manual
+> - [DOC_launcher_auto.md](DOC_launcher_auto.md) — Launcher autónomo con orquestador
+>
+> Este documento se conserva por referencia histórica.
+
 ---
 
-## Propósito del Archivo
+## Propósito del Archivo (Versión Anterior)
 
-`launcher_dashboard.py` es el punto de entrada principal para ejecutar el demo completo con interfaz web. Levanta 5 nodos P2P simultáneos, cada uno con su propio dashboard Flask, y coordina su inicio ordenado.
+`launcher_dashboard.py` era el punto de entrada principal para ejecutar el demo completo con interfaz web. Levanta 5 nodos P2P simultáneos, cada uno con su propio dashboard Flask, y coordina su inicio ordenado.
 
 **Analogía:** El launcher es como un director de orquesta que:
 - **Prepara los músicos** (configura cada nodo)
