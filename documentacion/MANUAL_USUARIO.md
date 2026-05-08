@@ -221,95 +221,134 @@ En la sección **Enviar Transacción**:
 
 Cada alumno corre un nodo en su computadora del laboratorio. El instructor corre el seed node y el dashboard global desde su máquina.
 
-### Instrucciones para el INSTRUCTOR
+---
 
-#### Paso 1: Configurar la IP en `config.py`
+### Setup Automático (Recomendado) — Sin Python ni venv
 
-Encontrar la IP de red del instructor:
+Los scripts en `setup/` hacen todo el trabajo: instalan Python, descargan el proyecto, crean el entorno virtual e instalan dependencias. Solo necesitas PowerShell (incluido en Windows).
+
+#### INSTRUCTOR — `setup/setup_instructor.ps1`
+
+**Paso 1** — Abre PowerShell (búscalo en el menú Inicio).
+
+**Paso 2** — Copia todo el contenido de `setup/setup_instructor.ps1` y pégalo en PowerShell. Presiona Enter.
+
+El script hace automáticamente:
+1. Instala Python desde la Microsoft Store
+2. Descarga el proyecto desde GitHub al Escritorio (`demo-bitcoin-main`)
+3. Crea el entorno virtual e instala todas las dependencias
+4. Detecta tu IP de red automáticamente
+
+Al terminar verás:
+```
+=== Listo ===
+IP del instructor: 192.168.1.1
+Comparte esta IP con los alumnos.
+
+Arrancar seed node y dashboard global ahora? (s/n)
+```
+
+Escribe `s` y presiona Enter para arrancar el seed node y el dashboard global en ventanas separadas. Comunica la IP a todos los alumnos.
+
+---
+
+#### ALUMNO — `setup/setup_alumno.ps1`
+
+**Paso 1** — Abre el archivo `setup/setup_alumno.ps1` con el Bloc de notas o cualquier editor.
+
+**Paso 2** — Cambia la IP del instructor en la primera línea de parámetros:
+
+```powershell
+[string]$SeedHost = "192.168.1.100",   # ← Reemplaza con la IP que dio el instructor
+```
+
+Por ejemplo, si el instructor dio `192.168.1.1`:
+
+```powershell
+[string]$SeedHost = "192.168.1.1",
+```
+
+Guarda el archivo.
+
+**Paso 3** — Abre PowerShell.
+
+**Paso 4** — Copia todo el contenido del archivo modificado y pégalo en PowerShell. Presiona Enter.
+
+El script hace automáticamente:
+1. Instala Python desde la Microsoft Store
+2. Descarga el proyecto desde GitHub al Escritorio
+3. Crea el entorno virtual e instala todas las dependencias
+4. Detecta tu IP de red automáticamente
+
+Al terminar verás:
+```
+=== Listo ===
+Mi IP:      192.168.1.5
+Dashboard:  http://192.168.1.5:8000
+Instructor: 192.168.1.1:8888
+
+Arrancar ahora? (s/n)
+```
+
+Escribe `s` y presiona Enter. Tu nodo arranca y el dashboard queda en `http://localhost:8000`.
+
+> **Nota:** Si ya se instaló Python en una sesión anterior, la instalación via winget se salta automáticamente y el script continúa con los pasos siguientes.
+
+---
+
+### Verificar conexión (alumno)
+
+En tu dashboard (`http://localhost:8000`):
+- La sección **Red P2P** debe mostrar peers conectados
+- La **Blockchain** debe mostrar la misma altura que otros nodos
+
+Desde otra computadora de la red también puedes acceder a:
+```
+http://192.168.1.5:8000
+```
+
+---
+
+### Alternativa: Setup Manual (sin scripts)
+
+Si los scripts automáticos no funcionan por restricciones del laboratorio, sigue estos pasos manuales.
+
+#### INSTRUCTOR
+
+Encontrar la IP de red:
 ```powershell
 ipconfig
-# Buscar "Dirección IPv4" en la adaptador de red LAN
+# Buscar "Dirección IPv4" en el adaptador de red LAN
 # Ejemplo: 192.168.1.1
 ```
 
-Modificar `config.py`:
-```python
-SEED_HOST = '192.168.1.1'  # IP del instructor
-```
-
-#### Paso 2: Arrancar el Seed Node
-
 ```powershell
-# Terminal 1
+# Terminal 1 — Seed node
+venv\Scripts\activate
 python main_seed.py
+
+# Terminal 2 — Dashboard global
+venv\Scripts\activate
+python main_global.py --seed-host 192.168.1.1
 ```
 
-Verificar que funciona:
+Verificar que el seed funciona:
 ```
 http://192.168.1.1:8888/health
 → {"status": "ok", "peers_count": 0, ...}
 ```
 
-#### Paso 3: Arrancar el Dashboard Global
+#### ALUMNO
 
 ```powershell
-# Terminal 2
-python main_global.py --seed-host 192.168.1.1
-```
-
-El dashboard global del instructor estará en:
-```
-http://localhost:9000
-```
-
-#### Paso 4: Dar instrucciones a los alumnos
-
-Comunicar a todos la IP del instructor: `192.168.1.1`
-
----
-
-### Instrucciones para el ALUMNO
-
-#### Paso 1: Configurar la IP del seed
-
-Opción A — Modificar `config.py`:
-```python
-SEED_HOST = '192.168.1.1'  # IP del instructor (la que dé el profesor)
-```
-
-Opción B — Variable de entorno (sin modificar código):
-```powershell
-$env:SEED_HOST = "192.168.1.1"
-```
-
-#### Paso 2: Encontrar tu propia IP
-
-```powershell
+# Encontrar tu IP
 ipconfig
 # Ejemplo: 192.168.1.5
-```
 
-#### Paso 3: Arrancar tu nodo
-
-```powershell
+# Arrancar tu nodo
+venv\Scripts\activate
 python main.py --host 192.168.1.5 --seed-host 192.168.1.1
 ```
-
-Tu dashboard estará en:
-```
-http://localhost:8000
-```
-
-O desde otra computadora de la red:
-```
-http://192.168.1.5:8000
-```
-
-#### Paso 4: Verificar conexión
-
-En tu dashboard:
-- La sección **Red P2P** debe mostrar peers conectados
-- La **Blockchain** debe mostrar la misma altura que otros nodos
 
 ---
 
@@ -641,6 +680,11 @@ blockchain-demo/
 ├── dashboard_global/   ← UI del instructor
 │   ├── app.py          ← Backend Flask
 │   └── templates/      ← HTML + JS + CSS
+├── setup/              ← Scripts de setup automático para LAN
+│   ├── setup_instructor.ps1  ← Instala todo y arranca seed + dashboard global
+│   └── setup_alumno.ps1      ← Instala todo y arranca el nodo del alumno
+├── documentacion/      ← Documentación del proyecto
+│   └── MANUAL_USUARIO.md
 ├── tests/              ← Suite pytest (38 archivos)
 ├── utils/logger.py     ← Logging por nodo
 ├── config.py           ← Configuración central
