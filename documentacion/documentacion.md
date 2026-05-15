@@ -8,27 +8,31 @@ Este proyecto es un demo educativo de blockchain tipo Bitcoin implementado en Py
 
 ### Estado Actual del Proyecto
 
-**Fases completadas:**
-- Red P2P básica
-- Gossip Protocol
-- Wallets y Transacciones
-- Integración P2P + TX (Demo CLI)
-- Dashboard Web Interactivo
+**Proyecto completo. Todas las fases implementadas:**
 
-**Trabajo futuro:**
-- Merkle Trees
-- Bloques y Blockchain
-- Proof of Work (PoW)
-- Propagación P2P de bloques
-- Evluación de alternativas de escalabilidad
+- Red P2P con WebSockets y gossip protocol
+- Wallets Ed25519 y transacciones firmadas
+- Merkle Trees (árbol completo + Merkle root)
+- Bloques y Blockchain con encadenamiento por hash
+- Proof of Work (SHA-256, dificultad ajustable automáticamente)
+- Propagación P2P de bloques y sincronización entre nodos
+- Detección y resolución de forks (regla de cadena más larga)
+- Seed Node para descubrimiento de peers en LAN
+- Orquestador de transacciones automáticas
+- Dashboard Web por nodo (Flask + JS)
+- Dashboard Global del instructor (vista unificada de toda la red)
+- Launchers para modo local (manual y auto) y modo LAN
+- Scripts de setup automático para laboratorio (PowerShell)
+- Suite de tests completa (11 archivos, 38+ tests)
 
 ### Objetivos
 
 - Replicar la arquitectura P2P de Bitcoin a pequeña escala
-- Demostrar descubrimiento de peers mediante gossip protocol
+- Demostrar descubrimiento de peers mediante seed node y gossip protocol
 - Implementar firmas digitales con EdDSA (Ed25519)
-- Proporcionar interfaz gráfica para visualización en tiempo real
-- Construir la base para blockchain, PoW y consenso en fases posteriores
+- Proporcionar interfaz gráfica por nodo y vista global del instructor
+- Demostrar minado con Proof of Work, bloques encadenados y consenso
+- Operar en red LAN real con múltiples máquinas simultáneas
 
 ### Stack Tecnológico
 
@@ -741,48 +745,231 @@ Estas optimizaciones son importantes en producción pero innecesarias para demos
 
 ---
 
-## 6. Despliegue y Visualización
+## 6. Merkle Trees
 
-### Arquitectura de Despliegue
+### Propósito
 
-El sistema actual permite dos modos de ejecución:
+El árbol de Merkle permite verificar eficientemente si una transacción está incluida en un bloque sin descargar todas las transacciones.
 
-**Modo A: Demo CLI (Automatizado)**
-```bash
-python demo_tx_cli.py
+### Implementación (`core/merkle.py`)
+
+```python
+# Construcción del árbol
+def build_merkle_tree(tx_hashes: list[str]) -> str:
+    # Empareja hashes de a dos
+    # Si número impar, duplica el último
+    # Hashea cada par: SHA256(left + right)
+    # Repite hasta obtener un solo hash (Merkle Root)
 ```
-- 5 nodos P2P (puertos 5000-5004)
-- 3 transacciones hardcodeadas
-- Salida en terminal
-- Duración: ~17 segundos
-- Propósito: Testing rápido
 
-**Modo B: Dashboard Web (Interactivo)**
-```bash
-python launcher_dashboard.py
+**Merkle Root:** Se incluye en el header de cada bloque. Si cualquier transacción cambia, el Merkle Root cambia, haciendo inválido el bloque.
+
+**Comparación con Bitcoin:**
+- Bitcoin: idéntico algoritmo (doble SHA-256)
+- Este demo: SHA-256 simple (mismo concepto)
+
+---
+
+## 7. Bloques y Blockchain
+
+### Estructura de un Bloque (`core/block.py`)
+
+```python
+Block
+├── index          → Altura en la cadena (0 = génesis)
+├── timestamp      → Timestamp Unix de creación
+├── transactions   → Lista de Transaction objects
+├── previous_hash  → Hash del bloque anterior (encadenamiento)
+├── merkle_root    → Raíz del árbol de Merkle de las TXs
+├── nonce          → Número encontrado en el minado (PoW)
+├── difficulty     → Target de dificultad en este bloque
+└── hash           → SHA-256 de todos los campos anteriores
 ```
-- 5 nodos P2P (puertos 5000-5004)
-- 5 servidores Flask (puertos 8000-8004)
-- Interfaz gráfica en navegador
-- Transacciones creadas manualmente
-- Propósito: Demo para evaluador
+
+**Inmutabilidad:** Si se modifica cualquier campo de un bloque antiguo, su hash cambia. Eso invalida el `previous_hash` del siguiente bloque, y así en cadena. Recalcular toda la cadena requeriría más poder de cómputo que la red entera.
+
+### Blockchain (`core/blockchain.py`)
+
+```python
+Blockchain
+├── chain[]            → Lista de bloques confirmados
+├── mempool[]          → TXs pendientes de confirmación
+├── utxo_set{}         → Conjunto de outputs no gastados
+└── pending_wallets{}  → Wallets conocidas por el nodo
+```
+
+**Validaciones al recibir un bloque:**
+1. `previous_hash` apunta al último bloque confirmado
+2. Hash del bloque cumple el target de dificultad (PoW válido)
+3. Merkle Root coincide con las transacciones incluidas
+4. Todas las transacciones tienen firmas válidas
+5. No hay double-spend (inputs ya gastados)
+
+**Resolución de forks (regla de cadena más larga):**
+
+Cuando dos nodos tienen versiones diferentes de la cadena:
+```
+Nodo A: [..., bloque 10a, bloque 11a]  ← altura 11
+Nodo B: [..., bloque 10b]              ← altura 10
+
+Nodo B recibe la cadena de A
+→ A tiene más altura (más trabajo acumulado)
+→ Nodo B adopta la cadena de A
+→ TXs del bloque 10b que no están en 10a vuelven al mempool
+```
+
+---
+
+## 8. Proof of Work
+
+### Algoritmo (`core/pow.py`)
+
+```python
+def mine_block(block, target):
+    block.nonce = 0
+    while True:
+        block.hash = sha256(block.header())
+        if int(block.hash, 16) < target:
+            return block  # PoW válido encontrado
+        block.nonce += 1
+```
+
+**Target:** Número de 256 bits. Un hash válido debe ser menor que el target. Cuanto más pequeño el target, más ceros iniciales requiere el hash, más difícil es el minado.
+
+**Dificultad ajustable:** Cada 5 bloques, el protocolo compara el tiempo real con el tiempo objetivo:
+```python
+# Si los bloques tardaron más → bajar dificultad (subir target)
+# Si los bloques tardaron menos → subir dificultad (bajar target)
+tiempo_real = timestamp_bloque_actual - timestamp_bloque_hace_5
+factor = tiempo_real / (5 × TARGET_BLOCK_TIME)
+nuevo_target = target_actual × factor
+```
+
+**Comparación con Bitcoin:**
+- Bitcoin ajusta cada 2016 bloques (≈2 semanas)
+- Este demo ajusta cada 5 bloques (para que las demos no tarden tanto)
+- El algoritmo de ajuste es conceptualmente idéntico
+
+---
+
+## 9. Seed Node y Descubrimiento en LAN
+
+### Problema
+
+En modo LAN, 30 máquinas necesitan encontrarse sin conocer de antemano las IPs de las demás.
+
+### Solución: Seed Node (`network/seed_node.py`)
+
+El seed node es un servidor HTTP simple que actúa como punto de rendezvous:
+
+```
+GET  /health          → {"status": "ok", "peers_count": N}
+POST /register        → Registra un nodo {host, port, node_id, address}
+GET  /peers           → Lista de todos los nodos registrados
+GET  /addresses       → Lista de wallets (para el orquestador)
+```
+
+**Flujo de conexión LAN:**
+```
+1. Instructor arranca main_seed.py
+   └─ Seed escucha en 0.0.0.0:8888
+
+2. Alumno arranca main.py --host 192.168.1.Y
+   └─ Nodo llama POST /register al seed
+   └─ Nodo llama GET /peers
+   └─ Conecta a todos los peers registrados
+
+3. A medida que llegan más alumnos, todos se conectan entre sí
+```
+
+**Seed Client (`network/seed_client.py`):** Encapsula las llamadas HTTP al seed desde cada nodo.
+
+---
+
+## 10. Orquestador de Transacciones (`core/tx_orchestrator.py`)
+
+### Propósito
+
+Genera transacciones automáticas entre los nodos para demostrar el funcionamiento de la red sin intervención manual del usuario.
+
+### Comportamiento
+
+```python
+# Cada TX_AUTO_BASE_INTERVAL ± TX_AUTO_JITTER segundos:
+1. Obtiene lista de wallets desde el seed (/addresses)
+2. Elige un nodo remitente con balance > 0 al azar
+3. Elige un nodo destinatario diferente al azar
+4. Calcula monto: balance × TX_AUTO_MAX_FRACTION (máx 20%)
+5. Crea y firma la TX vía API REST del nodo remitente
+6. La TX se propaga automáticamente por la red P2P
+```
+
+**Control:** Se puede pausar y reanudar desde el dashboard individual (Nodo 1) o desde el dashboard global del instructor.
+
+---
+
+## 11. Dashboard Global del Instructor (`dashboard_global/`)
+
+### Propósito
+
+Vista centralizada de toda la red, diseñada para proyectar en clase. El instructor puede ver el estado de todos los nodos y controlar el orquestador sin tocar los dashboards individuales.
+
+### Componentes
+
+- `dashboard_global/app.py` → Backend Flask, consulta cada nodo vía HTTP
+- `dashboard_global/templates/global.html` → UI del dashboard
+- `dashboard_global/static/global.js` → Auto-refresh cada 2s
+- `dashboard_global/static/global.css` → Estilos
+
+### Datos por nodo
+
+| Campo | Fuente |
+|---|---|
+| Altura de blockchain | `/api/info` del nodo |
+| Sincronización (✅⚠️🔴⬛) | Comparación con altura máxima de la red |
+| Balance | `/api/wallet` del nodo |
+| Peers conectados | `/api/peers` del nodo |
+| Modo de minado | `/api/info` del nodo |
+| Mempool | `/api/mempool` del nodo |
+
+### Control del Orquestador desde el Global
+
+```python
+# main_global.py crea un orquestador propio
+# A menos que se use --no-orchestrator
+python main_global.py --no-orchestrator  # Cuando launcher_auto.py ya tiene uno
+```
+
+---
+
+## 12. Despliegue y Visualización
+
+### Modos de Despliegue
+
+El sistema soporta cuatro variantes principales:
+
+| Modo | Script | Descripción |
+|---|---|---|
+| **Local Manual** | `launcher_manual.py` | 5 nodos, el usuario mina y envía TXs manualmente |
+| **Local Auto** | `launcher_auto.py` | 5 nodos + seed + orquestador de TXs automáticas |
+| **LAN** | `main.py` + `main_seed.py` | 1 nodo por máquina, seed en máquina del instructor |
+| **Dashboard Global** | `main_global.py` | Vista unificada de toda la red (complementa cualquier modo) |
 
 ### Mapeo de Puertos
 
-Cada nodo utiliza dos puertos:
-
-| Nodo | Puerto WebSocket (P2P) | Puerto HTTP (Dashboard) | Propósito |
-|------|------------------------|-------------------------|-----------|
-| Nodo 1 | 5000 | 8000 | Red P2P / UI Web |
-| Nodo 2 | 5001 | 8001 | Red P2P / UI Web |
-| Nodo 3 | 5002 | 8002 | Red P2P / UI Web |
-| Nodo 4 | 5003 | 8003 | Red P2P / UI Web |
-| Nodo 5 | 5004 | 8004 | Red P2P / UI Web |
+| Puerto | Servicio | Script |
+|---|---|---|
+| 5000–5004 | P2P WebSocket (nodos locales) | `launcher_*.py` |
+| 5000 | P2P WebSocket (nodo LAN) | `main.py` |
+| 8000–8004 | Dashboard Flask (nodos locales) | `launcher_*.py` |
+| 8000 | Dashboard Flask (nodo LAN) | `main.py` |
+| 8888 | Seed Node HTTP | `main_seed.py` / `launcher_auto.py` |
+| 9000 | Dashboard Global | `main_global.py` |
 
 **WebSocket (5000-5004):**
 - Protocolo: `ws://localhost:5000`
 - Uso: Comunicación P2P entre nodos
-- Mensajes: version, verack, ping, pong, getaddr, addr, tx
+- Mensajes: version, verack, ping, pong, getaddr, addr, tx, block, inv, getblocks
 
 **HTTP (8000-8004):**
 - Protocolo: `http://localhost:8000`
@@ -884,7 +1071,7 @@ Esto permite que Flask ejecute código asyncio sin bloquear su propio thread.
 
 ---
 
-## 7. Seguridad
+## 13. Seguridad
 
 ### Arquitectura de Seguridad
 
@@ -931,155 +1118,190 @@ Las siguientes vulnerabilidades existen intencionalmente para simplificar:
 
 ---
 
-## 8. Simplificaciones vs Bitcoin
+## 14. Simplificaciones vs Bitcoin
 
 | Concepto | Bitcoin Real | Este Demo | Impacto Educativo |
 |----------|-------------|-----------|-------------------|
 | Algoritmo de firma | ECDSA secp256k1 | EdDSA Ed25519 | Bajo (conceptos idénticos) |
 | Identificación de TX | TXID doble SHA256 | SHA256 simple | Mínimo |
 | Mensajes P2P de TX | Script engine completo | Validación simple | Medio |
-| Modelo de balance | UTXO (complejo) | Suma/resta simple | Alto (se implementará UTXO) |
+| Modelo de balance | UTXO | Account model simplificado | Medio |
 | Peers en disco | peers.dat (LevelDB) | Solo en memoria | Bajo |
 | Transport layer | TCP puro | WebSockets | Mínimo |
 | Nonce de firma | RFC 6979 (HMAC) | Determinístico Ed25519 | Mínimo |
-| Descubrimiento inicial | DNS Seeds | Delays hardcoded | Medio (DNS pendiente) |
+| Descubrimiento inicial | DNS Seeds | Seed node HTTP centralizado | Bajo |
+| Ajuste de dificultad | Cada 2016 bloques | Cada 5 bloques | Bajo (misma lógica) |
+| Recompensa de bloque | Halving cada 210k bloques | Fija (50 coins) | Bajo |
+| Propagación de bloques | `inv`/`getdata` pull model | Push directo | Bajo |
 
 ---
 
-## 9. Estructura de Archivos
+## 15. Estructura de Archivos
 
 ```
 blockchain-demo/
 │
-├── core/                      ← Lógica de blockchain
-│   ├── __init__.py
-│   ├── wallet.py              ← Ed25519, Base58Check addresses
-│   └── transaction.py         ← Transacciones firmadas
+├── core/                        ← Lógica de blockchain
+│   ├── wallet.py                ← Ed25519, Base58Check addresses
+│   ├── transaction.py           ← Transacciones firmadas
+│   ├── block.py                 ← Estructura del bloque
+│   ├── blockchain.py            ← Cadena, mempool, UTXO, consenso
+│   ├── merkle.py                ← Árbol de Merkle y Merkle root
+│   ├── pow.py                   ← Proof of Work (SHA-256, ajuste automático)
+│   └── tx_orchestrator.py       ← Bot generador de TXs automáticas
 │
-├── network/                   ← Red P2P
-│   ├── __init__.py
-│   ├── protocol.py            ← Formato de mensajes, checksum
-│   ├── peer_info.py           ← Metadata de peers para gossip
-│   └── p2p_node.py            ← Nodo P2P completo + mempool
+├── network/                     ← Red P2P
+│   ├── p2p_node.py              ← Nodo P2P completo (WebSocket)
+│   ├── protocol.py              ← Formato de mensajes, checksum
+│   ├── peer_info.py             ← Metadata de peers para gossip
+│   ├── seed_node.py             ← Servidor HTTP de descubrimiento
+│   └── seed_client.py           ← Cliente del seed node
 │
-├── dashboard/                 ← Interfaz web (Fase B)
-│   ├── __init__.py
-│   ├── app.py                 ← Servidor Flask
-│   ├── templates/
-│   │   └── dashboard.html     ← UI del dashboard
+├── dashboard/                   ← Dashboard por nodo
+│   ├── app.py                   ← Backend Flask
+│   ├── templates/dashboard.html ← UI del nodo
 │   └── static/
-│       ├── style.css          ← Estilos
-│       └── app.js             ← Auto-refresh, interacción
+│       ├── app.js               ← Auto-refresh, interacción
+│       └── style.css            ← Estilos
 │
-├── utils/                     ← Utilidades
-│   ├── __init__.py
-│   └── logger.py              ← Logging por nodo (node_5000.log)
+├── dashboard_global/            ← Dashboard global del instructor
+│   ├── app.py                   ← Backend Flask
+│   ├── templates/global.html    ← Vista unificada de la red
+│   └── static/
+│       ├── global.js            ← Auto-refresh, control orquestador
+│       └── global.css           ← Estilos
 │
-├── tests/                     ← Suite de tests
-│   ├── __init__.py
-│   ├── test_wallet.py         ← 10 tests (Ed25519, firmas, addresses)
-│   └── test_transaction.py    ← 13 tests (crear, firmar, validar)
+├── setup/                       ← Scripts de setup automático (LAN)
+│   ├── setup_instructor.ps1     ← Instala todo + arranca seed y global
+│   └── setup_alumno.ps1         ← Instala todo + arranca nodo alumno
 │
-├── documentacion/             ← Documentación técnica
-│   ├── documentacion.md       ← Este documento (general)
-│   └── DOC/                   ← Documentación detallada por archivo
-│       ├── DOC_core_wallet.md
-│       ├── DOC_core_transaction.md
-│       ├── DOC_network_p2p_node.md
-│       ├── DOC_network_protocol.md
-│       ├── DOC_network_peer_info.md
-│       ├── DOC_launcher_dashboard.md
-│       ├── DOC_demo_tx_cli.md
-│       ├── DOC_dashboard_app.md
-│       ├── DOC_dashboard_static_app_js.md
-│       └── DOC_dashboard_templates_dashboard_html.md
+├── documentacion/               ← Documentación técnica
+│   ├── documentacion.md         ← Este documento
+│   ├── MANUAL_USUARIO.md        ← Manual completo de uso
+│   ├── instrucciones.md         ← Referencia rápida de comandos
+│   └── DOC/                     ← Documentación detallada por módulo
+│       ├── core/
+│       │   ├── DOC_core_wallet.md
+│       │   ├── DOC_core_transaction.md
+│       │   ├── DOC_core_block.md
+│       │   ├── DOC_core_blockchain.md
+│       │   ├── DOC_core_merkle.md
+│       │   ├── DOC_core_pow.md
+│       │   └── DOC_core_tx_orchestrator.md
+│       ├── network/
+│       │   ├── DOC_network_p2p_node.md
+│       │   ├── DOC_network_protocol.md
+│       │   ├── DOC_network_peer_info.md
+│       │   └── DOC_network_seed.md
+│       ├── dashboard/
+│       │   └── DOC_dashboard.md
+│       ├── daschboard_global/
+│       │   ├── DOC_dashboard_global_app.md
+│       │   ├── DOC_dashboard_global_html.md
+│       │   ├── DOC_dashboard_global_js.md
+│       │   └── DOC_dashboard_global_css.md
+│       ├── tests/
+│       │   ├── DOC_test_wallet.md
+│       │   ├── DOC_test_transaction.md
+│       │   ├── DOC_test_block.md
+│       │   ├── DOC_test_blockchain.md
+│       │   ├── DOC_test_blockchain_chain.md
+│       │   ├── DOC_test_merkle.md
+│       │   ├── DOC_test_pow.md
+│       │   ├── DOC_test_p2p_node.md
+│       │   ├── DOC_test_protocol.md
+│       │   ├── DOC_test_seed_node.md
+│       │   └── DOC_test_tx_orchestrator.md
+│       ├── DOC_config.md
+│       ├── DOC_main.md
+│       ├── DOC_main_seed.md
+│       ├── DOC_main_global.md
+│       ├── DOC_launcher_manual.md
+│       └── DOC_launcher_auto.md
 │
-├── logs/                      ← Logs generados (no en git)
-│   ├── node_5000.log
-│   ├── node_5001.log
-│   └── ...
+├── tests/                       ← Suite pytest (11 archivos)
+│   ├── test_wallet.py
+│   ├── test_transaction.py
+│   ├── test_block.py
+│   ├── test_blockchain.py
+│   ├── test_blockchain_chain.py
+│   ├── test_merkle.py
+│   ├── test_pow.py
+│   ├── test_p2p_node.py
+│   ├── test_protocol.py
+│   ├── test_seed_node.py
+│   └── test_tx_orchestrator.py
 │
-├── demo_tx_cli.py             ← Demo CLI automatizado (Fase A)
-├── launcher_dashboard.py      ← Launcher dashboard web (Fase B)
-├── test_network.py            ← Test manual de red (5 nodos)
-├── setup.py                   ← Registro de paquete (pip install -e .)
-├── requirements.txt           ← Dependencias
-└── .gitignore                 ← Excluye venv/, logs/, __pycache__/
+├── utils/logger.py              ← Logging por nodo
+├── config.py                    ← Configuración central (dificultad, puertos, etc.)
+├── main.py                      ← Entry point LAN (1 nodo por máquina)
+├── main_seed.py                 ← Entry point seed node
+├── main_global.py               ← Entry point dashboard global
+├── launcher_manual.py           ← Demo local 5 nodos (modo manual)
+├── launcher_auto.py             ← Demo local 5 nodos (modo auto + seed)
+├── logs/                        ← Logs generados en tiempo de ejecución
+├── setup.py                     ← Registro de paquete (pip install -e .)
+├── pytest.ini                   ← Configuración de pytest
+├── requirements.txt             ← Dependencias Python
+└── .gitignore                   ← Excluye venv/, logs/, __pycache__/
 ```
 
 ### Dependencias (requirements.txt)
 
 ```
-websockets==12.0         ← Comunicación P2P
-cryptography==41.0.7     ← EdDSA Ed25519, SHA256
-pycryptodome==3.19.0     ← RIPEMD160, Base58
-flask==3.0.0             ← Dashboard web
-pytest==7.4.3            ← Testing
-pytest-asyncio==0.21.1   ← Tests asíncronos
-pytest-cov==4.1.0        ← Coverage
+websockets       ← Comunicación P2P (WebSocket)
+cryptography     ← EdDSA Ed25519, SHA256
+pycryptodome     ← RIPEMD160, Base58Check
+flask            ← Dashboard web y dashboard global
+pytest           ← Framework de testing
+pytest-asyncio   ← Tests asíncronos
+pytest-cov       ← Cobertura de tests
+requests         ← HTTP client (seed_client, orquestador)
 ```
 
 ---
 
-## 10. Trabajo Futuro
-
-### Fases Pendientes
-
-**Merkle Trees**
-- Implementar árbol de Merkle para transacciones
-- Merkle root en header de bloque
-- Pruebas de inclusión (Merkle proofs)
-
-**Bloques y Blockchain**
-- Estructura de bloques
-- Encadenamiento con hash del bloque anterior
-- Validación de cadena
-
-**Proof of Work**
-- Algoritmo de minado (SHA-256)
-- Recompensa por bloque (coinbase)
-- Validación de PoW
-
-**Propagación P2P de Bloques**
-- Mensajes `inv` (inventory)
-- Mensajes `getdata` / `block`
-- Sincronización de blockchain entre nodos
-
-**Evaluación de Escalabilidad**
-- Propuestas de optimización, correcciones o depuración
-
-### Mejoras Pendientes
-
-**Red P2P:**
-- DNS Seed Server (reemplazar delays hardcoded)
-
-**Transacciones:**
-- Modelo UTXO mejorado
-- Prevención de double-spend pre-confirmación
-
-**Dashboard:**
-- Historial de transacciones confirmadas
-- Visualización de blockchain
 ---
 
-## Documentación detallada
+## Documentación Detallada por Módulo
 
-La documentación técnica detallada de cada componente del sistema se encuentra disponible en el github https://github.com/BrunoRavelo/demo-bitcoin, en donde se encuentran los archivos:
+La carpeta `documentacion/DOC/` contiene un archivo Markdown por módulo con análisis detallado de arquitectura, comparación con Bitcoin, flujos y ejemplos.
 
-1. **DOC_core_wallet.md** - Sistema de wallets, Ed25519, Base58Check
-2. **DOC_core_transaction.md** - Estructura y validación de transacciones
-3. **DOC_network_p2p_node.md** - Implementación completa del nodo P2P
-4. **DOC_network_protocol.md** - Protocolo de mensajería P2P
-5. **DOC_network_peer_info.md** - Gestión de información de peers
-6. **DOC_launcher_dashboard.md** - Sistema de lanzamiento del dashboard
-7. **DOC_demo_tx_cli.md** - Demo automatizado CLI
-8. **DOC_dashboard_app.md** - Backend Flask del dashboard
-9. **DOC_dashboard_static_app_js.md** - Frontend JavaScript
-10. **DOC_dashboard_templates_dashboard_html.md** - Estructura HTML
+**Core:**
+1. `DOC_core_wallet.md` — Sistema de wallets, Ed25519, Base58Check
+2. `DOC_core_transaction.md` — Estructura y validación de transacciones
+3. `DOC_core_block.md` — Estructura del bloque y encadenamiento
+4. `DOC_core_blockchain.md` — Cadena, mempool, UTXO, consenso, forks
+5. `DOC_core_merkle.md` — Árbol de Merkle y Merkle root
+6. `DOC_core_pow.md` — Proof of Work y ajuste de dificultad
+7. `DOC_core_tx_orchestrator.md` — Orquestador de TXs automáticas
 
-Cada documento anexo proporciona análisis detallado de:
+**Network:**
+8. `DOC_network_p2p_node.md` — Nodo P2P completo (WebSocket)
+9. `DOC_network_protocol.md` — Protocolo de mensajería P2P
+10. `DOC_network_peer_info.md` — Gestión de peers y gossip
+11. `DOC_network_seed.md` — Seed node HTTP
+
+**Dashboard:**
+12. `DOC_dashboard.md` — Dashboard individual (Flask + JS)
+13. `DOC_dashboard_global_app.md` — Dashboard global backend
+14. `DOC_dashboard_global_html.md` — Dashboard global frontend HTML
+15. `DOC_dashboard_global_js.md` — Dashboard global JavaScript
+16. `DOC_dashboard_global_css.md` — Dashboard global estilos
+
+**Entry points y config:**
+17. `DOC_config.md` — Parámetros de configuración central
+18. `DOC_main.md` — Entry point LAN (1 nodo)
+19. `DOC_main_seed.md` — Entry point seed node
+20. `DOC_main_global.md` — Entry point dashboard global
+21. `DOC_launcher_manual.md` — Launcher demo local manual
+22. `DOC_launcher_auto.md` — Launcher demo local automático
+
+**Tests:**
+23–33. `DOC_test_*.md` — Un archivo por módulo de test
+
+Cada documento proporciona:
 - Arquitectura y decisiones de diseño
-- Explicación línea por línea del código
 - Comparación con Bitcoin real
-- Ejemplos de uso y casos de prueba
-- Diagramas de flujo y secuencia
+- Flujos de ejecución y diagramas
+- Ejemplos de uso

@@ -38,24 +38,22 @@ venv\Scripts\activate          # Windows PowerShell
 pip install -r requirements.txt
 ```
 
-Verificar instalación correcta:
-
-```powershell
-python -c "import websockets, flask, cryptography; print('OK')"
-# Debe imprimir: OK
-```
-
 ---
 
 ## Modos de Ejecución
 
-El programa tiene **tres modos principales**:
+El programa tiene **seis variantes de ejecución**:
 
-| Modo | Cuándo usar | Script |
-|------|-------------|--------|
-| **Local Manual** | Demo interactivo — el usuario controla todo | `launcher_manual.py` |
-| **Local Auto** | Demo autónomo — la red funciona sola | `launcher_auto.py` |
-| **LAN** | Laboratorio — cada alumno en su máquina | `main.py` + `main_seed.py` |
+| Modo | Cuándo usar | Scripts |
+|------|-------------|---------|
+| **1 — Local Manual** | Demo interactivo, control total | `launcher_manual.py` |
+| **1B — Local Manual + Dashboard Global** | Igual + vista de red en proyector | `main_seed.py` + `launcher_manual.py` + `main_global.py` |
+| **2 — Local Auto** | Demo autónomo con TXs automáticas | `launcher_auto.py` |
+| **2B — Local Auto + Dashboard Global** | Igual + vista de red en proyector | `launcher_auto.py` + `main_global.py` |
+| **3 — LAN Completa** | Laboratorio con dashboard global y orquestador | `main_seed.py` + `main_global.py` + `main.py` |
+| **3F — LAN sin dashboard global** | Laboratorio, cada alumno ve solo su nodo | `main_seed.py` + `main.py` |
+| **3G — LAN sin orquestador** | Laboratorio con TXs solo manuales | `main_seed.py` + `main_global.py --no-orchestrator` + `main.py` |
+| **3H — LAN sin dashboard en nodos** | Toda la visualización en el proyector del instructor | `main_seed.py` + `main_global.py` + `main.py --no-dashboard` |
 
 ---
 
@@ -173,6 +171,53 @@ Abre `http://localhost:8000` en tu navegador. Verás:
 
 ---
 
+## Modo 1B: Local Manual + Dashboard Global
+
+### ¿Qué es?
+
+Igual que el Modo 1, pero agrega una vista centralizada en `http://localhost:9000` que el instructor puede proyectar para mostrar el estado de toda la red mientras explica.
+
+### Cuándo usarlo
+
+Cuando se quiere explicar el flujo manual (minar → TX → confirmar) y a la vez mostrar en el proyector cómo se propaga la información entre nodos.
+
+### Cómo arrancar (3 terminales)
+
+> **Por qué 3 terminales:** `launcher_manual.py` no arranca seed (no lo necesita para conectar los nodos). El dashboard global sí necesita seed para descubrir los nodos. Hay que arrancarlo por separado.
+
+**Terminal 1:**
+```powershell
+venv\Scripts\activate
+python main_seed.py
+```
+
+**Terminal 2** (esperar ~2s):
+```powershell
+venv\Scripts\activate
+python launcher_manual.py
+```
+
+**Terminal 3** (esperar ~3s):
+```powershell
+venv\Scripts\activate
+python main_global.py --no-orchestrator
+```
+
+> **Por qué `--no-orchestrator`:** `main_global.py` crea un orquestador de TXs automáticas por defecto. Esto contradice el modo manual. El flag lo desactiva.
+
+### Dashboards
+
+```
+http://localhost:9000       ← Dashboard global (proyector)
+http://localhost:8000       ← Nodo 1
+http://localhost:8001       ← Nodo 2
+http://localhost:8002       ← Nodo 3
+http://localhost:8003       ← Nodo 4
+http://localhost:8004       ← Nodo 5
+```
+
+---
+
 ## Modo 2: Local Auto
 
 ### ¿Qué es?
@@ -212,6 +257,45 @@ En la sección **Enviar Transacción**:
 - Clic **"MANUAL"** → el orquestador se pausa (TXs solo manuales)
 
 > **Nota:** Los controles de TXs afectan a todos los nodos. Si pausa las TXs en el Nodo 1, se pausan para todos.
+
+---
+
+## Modo 2B: Local Auto + Dashboard Global
+
+### ¿Qué es?
+
+Igual que el Modo 2, pero agrega el dashboard global en `http://localhost:9000` para proyectar el estado completo de la red.
+
+### Cuándo usarlo
+
+Cuando se quiere mostrar minado competitivo, forks y TXs automáticas, y a la vez el instructor quiere proyectar una vista unificada de todos los nodos.
+
+### Cómo arrancar (2 terminales)
+
+**Terminal 1:**
+```powershell
+venv\Scripts\activate
+python launcher_auto.py
+```
+
+**Terminal 2** (esperar ~3s):
+```powershell
+venv\Scripts\activate
+python main_global.py --no-orchestrator
+```
+
+> **Por qué `--no-orchestrator`:** `launcher_auto.py` ya incluye su propio orquestador de TXs. Si `main_global.py` crea otro, se duplican las TXs automáticas.
+
+### Dashboards
+
+```
+http://localhost:9000       ← Dashboard global (proyector)
+http://localhost:8000       ← Nodo 1
+http://localhost:8001       ← Nodo 2
+http://localhost:8002       ← Nodo 3
+http://localhost:8003       ← Nodo 4
+http://localhost:8004       ← Nodo 5
+```
 
 ---
 
@@ -352,6 +436,85 @@ python main.py --host 192.168.1.5 --seed-host 192.168.1.1
 
 ---
 
+### Variantes LAN
+
+#### Modo 3 — LAN Completa (Recomendado)
+
+Seed + nodos + dashboard global + orquestador de TXs automáticas. Configuración estándar para laboratorio con 30 máquinas.
+
+**Orden obligatorio de inicio:**
+```
+1. main_seed.py          (instructor — primero siempre)
+2. main_global.py        (instructor — segunda ventana)
+3. main.py --host X  ×N  (alumnos — cualquier orden entre ellos)
+```
+
+```powershell
+# Instructor — Terminal 1
+python main_seed.py
+
+# Instructor — Terminal 2
+python main_global.py --seed-host 192.168.1.1
+
+# Cada alumno
+python main.py --host 192.168.1.Y
+```
+
+Dashboard instructor: `http://192.168.1.1:9000`
+Dashboard alumno: `http://192.168.1.Y:8000`
+
+---
+
+#### Modo 3F — LAN sin Dashboard Global
+
+Solo seed + nodos. Cada alumno ve únicamente su propio nodo. Útil si no se necesita vista centralizada.
+
+```powershell
+# Instructor
+python main_seed.py
+
+# Cada alumno
+python main.py --host 192.168.1.Y
+```
+
+---
+
+#### Modo 3G — LAN sin Orquestador
+
+Seed + nodos + dashboard global, pero **sin TXs automáticas**. Las transacciones solo ocurren cuando los alumnos las envían manualmente.
+
+```powershell
+# Instructor — Terminal 1
+python main_seed.py
+
+# Instructor — Terminal 2
+python main_global.py --no-orchestrator --seed-host 192.168.1.1
+
+# Cada alumno
+python main.py --host 192.168.1.Y
+```
+
+---
+
+#### Modo 3H — LAN sin Dashboard en los Nodos
+
+Seed + nodos (sin UI local) + dashboard global. Reduce la carga en las máquinas alumno. Toda la visualización queda en el proyector del instructor.
+
+```powershell
+# Instructor — Terminal 1
+python main_seed.py
+
+# Instructor — Terminal 2
+python main_global.py --seed-host 192.168.1.1
+
+# Cada alumno — el nodo mina y participa, pero sin Flask local
+python main.py --host 192.168.1.Y --no-dashboard
+```
+
+> **Nota:** Con `--no-dashboard` el nodo sigue minando y propagando bloques normalmente — solo no tiene interfaz web propia.
+
+---
+
 ## Dashboard Individual — Referencia Completa
 
 ### Secciones
@@ -442,139 +605,53 @@ Desde el dashboard global, el instructor puede:
 
 ## Configuración Avanzada
 
+Todos los parámetros están en `config.py`.
+
 ### Ajustar la Dificultad de Minado
 
-Editar `config.py`:
+El tiempo de minado depende del hardware. Ajusta `INITIAL_TARGET` antes de arrancar:
 
-```python
-# Más fácil (bloques en ~10 segundos)
-INITIAL_TARGET = MAX_TARGET // 500_000
+| Tiempo objetivo | Valor de `INITIAL_TARGET` | Recomendado para |
+|---|---|---|
+| ~10 segundos | `MAX_TARGET // 500_000` | Demo rápido, clase activa |
+| ~30 segundos | `MAX_TARGET // 1_500_000` | **Demo en clase (recomendado)** |
+| ~60 segundos | `MAX_TARGET // 3_000_000` | Demo pausado con explicación |
+| ~180 segundos | `MAX_TARGET // 9_000_000` | Simulación realista |
 
-# Más difícil (bloques en ~5 minutos)
-INITIAL_TARGET = MAX_TARGET // 15_000_000
+> **Consejo:** arranca con `MAX_TARGET // 500_000`. El dashboard muestra los h/s reales del minero — con ese dato puedes calcular el target exacto para el tiempo que quieres. El ajuste automático de dificultad corrige cada 5 bloques.
 
-# Tiempo objetivo por bloque
-TARGET_BLOCK_TIME = 60   # 1 minuto
-TARGET_BLOCK_TIME = 180  # 3 minutos (default)
-```
+### Referencia Completa de Parámetros
 
-### Ajustar TXs Automáticas
-
-```python
-# Más frecuentes (cada 5-8 segundos)
-TX_AUTO_BASE_INTERVAL = 5
-TX_AUTO_JITTER = 3
-
-# Menos frecuentes (cada 30-45 segundos)
-TX_AUTO_BASE_INTERVAL = 30
-TX_AUTO_JITTER = 15
-```
-
-### Número de TXs por Bloque
-
-```python
-MAX_TXS_PER_BLOCK = 10   # default
-MAX_TXS_PER_BLOCK = 5    # bloques más pequeños
-MAX_TXS_PER_BLOCK = 20   # bloques más grandes
-```
+| Variable | Default | Descripción |
+|---|---|---|
+| `SEED_HOST` | `'localhost'` | IP del seed. **Cambiar a IP del instructor en LAN** |
+| `SEED_PORT` | `8888` | Puerto del seed node |
+| `INITIAL_TARGET` | `MAX_TARGET // 1_500_000` | Dificultad inicial (~30s/bloque) |
+| `TARGET_BLOCK_TIME` | `180` | Tiempo objetivo del ajuste automático (segundos) |
+| `DIFFICULTY_ADJUSTMENT_INTERVAL` | `5` | Ajuste automático cada N bloques |
+| `BLOCK_REWARD` | `50` | Coins por bloque minado |
+| `TX_AUTO_BASE_INTERVAL` | `15` | Segundos entre TXs del orquestador |
+| `TX_AUTO_JITTER` | `10` | Variación aleatoria del intervalo |
+| `TX_AUTO_MAX_FRACTION` | `0.2` | Máximo 20% del balance por TX automática |
+| `MAX_TXS_PER_BLOCK` | `10` | TXs máximas incluidas por bloque |
+| `MINING_AUTO_START` | `True` | Modo de minado al arrancar con `main.py` (LAN). No afecta a launchers. |
 
 ---
 
-## Solución de Problemas
 
-### "Address already in use"
+## Combinaciones no Factibles
 
-```
-Error: [Errno 98] Address already in use
-```
+Errores comunes al intentar combinar modos:
 
-**Causa:** Puerto ocupado por una ejecución anterior no terminada.
-
-**Solución:**
-```powershell
-# Buscar proceso en el puerto
-netstat -ano | findstr :8000
-netstat -ano | findstr :5000
-
-# Terminar el proceso (reemplazar PID con el número encontrado)
-taskkill /PID <PID> /F
-```
-
-O simplemente cerrar la terminal anterior y esperar 30 segundos.
-
----
-
-### Dashboard no carga
-
-**Síntoma:** El navegador muestra "No se puede acceder a este sitio"
-
-**Verificar:**
-
-1. Que el launcher sigue corriendo en la terminal
-2. Que el puerto es correcto (8000 para Nodo 1, 8001 para Nodo 2, etc.)
-3. Que Flask arrancó correctamente:
-
-```powershell
-# Debe aparecer en la terminal del launcher:
-* Running on http://127.0.0.1:8000
-```
-
----
-
-### Los peers no se conectan
-
-**Síntoma:** Dashboard muestra "Peers: 0" después de 10+ segundos
-
-**Verificar:**
-
-1. Que todos los nodos están corriendo (ver terminal del launcher)
-2. Que los puertos 5000-5004 no están bloqueados por el firewall
-3. En modo LAN: que el seed está activo y la IP está configurada correctamente:
-
-```
-http://192.168.1.1:8888/health
-→ {"status": "ok", ...}
-```
-
----
-
-### El balance no actualiza
-
-**Síntoma:** Envié una TX pero el balance no cambia
-
-**Causa:** Las TXs en el **mempool** no están confirmadas — necesitan ser incluidas en un bloque.
-
-**Solución:** Minar un bloque (en cualquier nodo). Al minar, la TX se confirma y los balances se actualizan.
-
----
-
-### Nodo desfasado en el dashboard global
-
-**Síntoma:** Un nodo muestra ⚠️ o 🔴 en el dashboard global
-
-**Causa:** El nodo tiene una versión más antigua de la blockchain que los demás.
-
-**Qué ocurre automáticamente:** El protocolo P2P detecta el desfase y solicita la cadena completa al peer con mayor altura. En ~30 segundos el nodo debería sincronizarse solo.
-
-**Si persiste:** El nodo puede estar desconectado. Verificar que el dashboard individual de ese nodo responde.
-
----
-
-### Error al instalar dependencias
-
-```
-ERROR: Could not find a version that satisfies the requirement...
-```
-
-**Solución:**
-
-```powershell
-# Actualizar pip primero
-python -m pip install --upgrade pip
-
-# Reinstalar dependencias
-pip install -r requirements.txt
-```
+| Combinación | Por qué no funciona | Solución |
+|---|---|---|
+| **Local Manual + Dashboard Global sin seed explícito** | `launcher_manual.py` no arranca seed. El dashboard global ve la red vacía. | Usar Modo 1B: arrancar `main_seed.py` primero en Terminal 1. |
+| **Local Auto sin seed** | Imposible: `launcher_auto.py` requiere seed para el orquestador. | El seed ya está integrado en `launcher_auto.py` — no hace falta arrancarlo aparte. |
+| **LAN sin seed** | Sin punto de rendezvous, las máquinas no pueden descubrirse entre sí. | Siempre arrancar `main_seed.py` en la máquina del instructor primero. |
+| **Orquestador sin seed** | El orquestador obtiene las wallets desde `/addresses` del seed. Sin seed no tiene a quién enviarle TXs. | Arrancar seed antes que el orquestador. |
+| **Dashboard global sin seed** | Depende del seed para descubrir nodos. Sin seed retorna lista vacía. | Arrancar seed antes que `main_global.py`. |
+| **Dos instancias del mismo launcher simultáneamente** | Conflicto de puertos (5000–5004, 8000–8004, 8888). La segunda falla con `Address already in use`. | Terminar la primera instancia antes de arrancar otra. |
+| **`main_global.py` sin `--no-orchestrator` junto a `launcher_auto.py`** | Se crean dos orquestadores: uno en el launcher y otro en el global. Las TXs automáticas se duplican. | Usar `python main_global.py --no-orchestrator` en Modo 2B. |
 
 ---
 
